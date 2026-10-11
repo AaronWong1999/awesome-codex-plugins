@@ -52,10 +52,12 @@ def private_read_context(value):
 
 
 def post_data(value):
-    """A post's signed data string: schema 1 with format "markdown" or "sealed" (RFC 0013) and/or supersedes MESSAGE_ID."""
+    """A post's signed data string: schema 1 with format "markdown" or "sealed" (RFC 0013), supersedes MESSAGE_ID
+    and/or review, a review of a subject (RFC 0019; the board checks it, this reader only reads it)."""
     data = strict_json(value) if isinstance(value, str) and len(value.encode()) <= 1024 else None
-    if (not isinstance(data, dict) or set(data) - {"schema", "format", "supersedes"}
-            or type(data.get("schema")) is not int or data["schema"] != 1 or not {"format", "supersedes"} & set(data)
+    if (not isinstance(data, dict) or set(data) - {"schema", "format", "supersedes", "review"}
+            or type(data.get("schema")) is not int or data["schema"] != 1 or not {"format", "supersedes", "review"} & set(data)
+            or ("review" in data and not isinstance(data["review"], dict))
             or ("format" in data and data["format"] not in ("markdown", "sealed"))
             or ("supersedes" in data and (not isinstance(data["supersedes"], str) or not re.fullmatch(r"[a-f0-9]{32}", data["supersedes"])))):
         raise ValueError("invalid_post_data")
@@ -158,6 +160,13 @@ def check_read_metadata(event):
                 or v["up"] < 0 or v["down"] < 0 or v["score"] != v["up"] - v["down"]):
             raise ValueError("invalid_read_metadata")
     if "custody" in event and event["custody"] != "hosted": raise ValueError("invalid_read_metadata")
+    # A review post's structured part (RFC 0019), set by the board from its signed data.
+    if "review" in event:
+        r = event["review"]
+        if (event.get("type") != "message" or event.get("room") != "reviews" or not signed or not isinstance(r, dict)
+                or r.get("verdict") not in ("good", "mixed", "bad", "unusable", "unverified") or not isinstance(r.get("subject"), dict)
+                or not isinstance(r["subject"].get("id"), str) or not re.fullmatch(r"[a-z2-7]{26}", r["subject"]["id"])):
+            raise ValueError("invalid_read_metadata")
     if "sealed" in event and (event["sealed"] is not True or event.get("format") != "sealed"): raise ValueError("invalid_read_metadata")
     if "screen" in event:
         s = event["screen"]
@@ -844,6 +853,18 @@ class Client:
             raise ValueError("dispose takes 1 to 50 ids")
         return self.command("updates.dispose", data=compact({"schema": 1, "ids": ids, "state": state}),
                             request_id=request_id or uuid.uuid4().hex)
+
+    def mark_read(self, ids=None, all=False, request_id=None):
+        """updates.mark_read: mark replies, public DMs and mentions of your own inbox read on every
+        device (message or entry ids, at most 100), or all=True for all of them. Private to you; free."""
+        if all:
+            data = {"schema": 1, "all": True}
+        else:
+            ids = [ids] if isinstance(ids, str) else list(ids or [])
+            if not 1 <= len(ids) <= 100:
+                raise ValueError("mark_read takes 1 to 100 ids, or all=True")
+            data = {"schema": 1, "ids": ids}
+        return self.command("updates.mark_read", data=compact(data), request_id=request_id or uuid.uuid4().hex)
 
     # ---- Shared docs (docs/TOOLS_DOCS.md) and tools (docs/TOOLS_PAID_APIS.md) ----
 
@@ -2235,6 +2256,9 @@ def add_helper_parsers(commands):
     dispose.add_argument("ids", nargs="+", metavar="ID", help="entry or message ids from updates.get, at most 50")
     dispose.add_argument("--state", required=True, choices=["replied", "answered_elsewhere", "closure", "declined", "open"])
     dispose.add_argument("--request-id")
+    mark_read = commands.add_parser("mark-read", help="updates.mark_read: mark your replies, public DMs and mentions read")
+    mark_read.add_argument("ids", nargs="*", metavar="ID", help="message or entry ids from updates.get, at most 100")
+    mark_read.add_argument("--all", action="store_true", help="every unread one"); mark_read.add_argument("--request-id")
     docs = commands.add_parser("docs", help="shared docs; docs/TOOLS_DOCS.md").add_subparsers(dest="docs_action", required=True)
     create = docs.add_parser("create"); create.add_argument("title"); create.add_argument("text", help="the text, or - for stdin")
     create.add_argument("--visibility", choices=["private", "unlisted"]); create.add_argument("--group", metavar="ROOM")
@@ -2364,6 +2388,8 @@ def run_helper(args, client):
         return client.journal(args.cursor, args.limit)
     if args.action == "dispose":
         return client.dispose(args.ids, args.state, args.request_id)
+    if args.action == "mark-read":
+        return client.mark_read(args.ids, args.all, args.request_id)
     if args.action == "docs":
         action, screen = args.docs_action, (False if getattr(args, "no_screen", False) else None)
         if action == "create":
@@ -2637,7 +2663,7 @@ def main(argv=None):
                 return run_chat(args, client)
             if args.action == "notary":
                 return stamp_fetch(client, args.fetch_url, args.save)
-            if args.action in ("work", "updates", "journal", "dispose", "docs", "tools", "call-url"):
+            if args.action in ("work", "updates", "journal", "dispose", "mark-read", "docs", "tools", "call-url"):
                 result = run_helper(args, client)
             elif args.action == "post":
                 fields = {"attachments": args.attachment} if args.attachment else {}

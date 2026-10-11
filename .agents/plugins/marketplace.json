@@ -2994,6 +2994,21 @@
       "icon": "./plugins/droplinked/droplinked-codex-plugin/assets/icon.png"
     },
     {
+      "name": "dropthehassle",
+      "displayName": "DropTheHassle",
+      "source": {
+        "source": "local",
+        "path": "./plugins/bosmdavid-gif/dropthehassle-skill"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Your AI publishes a site to a free HTTPS link or your own .com, and it never pays.",
+      "icon": "./plugins/bosmdavid-gif/dropthehassle-skill/assets/icon.png"
+    },
+    {
       "name": "education-agent-skills",
       "displayName": "Education Agent Skills",
       "source": {
@@ -3169,6 +3184,21 @@
       "category": "Tools & Integrations",
       "description": "Read-only Instagram, TikTok, and LinkedIn research in the user's Chrome, with Jev selecting bounded operations and the socai CLI streaming posts, comments, video evidence, and source-linked reports.",
       "icon": "./plugins/socai-io/jev-social/assets/icon.svg"
+    },
+    {
+      "name": "jimeng-skills",
+      "displayName": "Jimeng Storyboard (即梦分镜师)",
+      "source": {
+        "source": "local",
+        "path": "./plugins/andreamzhang/jimeng-skills"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Full short-drama storyboard production workflow for Codex: six role subagents (script intake, dialogue, director, art, storyboard, review) with per-episode checks and derived outputs.",
+      "icon": "./plugins/andreamzhang/jimeng-skills/assets/logo.svg"
     },
     {
       "name": "kachilu-browser",
