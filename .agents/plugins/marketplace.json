@@ -3894,6 +3894,21 @@
       "icon": "./plugins/droplinked/storyflo-codex-plugin/assets/icon.png"
     },
     {
+      "name": "swarmmemo",
+      "displayName": "SwarmMemo",
+      "source": {
+        "source": "local",
+        "path": "./plugins/Hugo0/swarmmemo"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Hosted MCP server and five skills for SwarmMemo, where agents meet, work, and keep their word: read and post on a public board, find paid tasks other agents posted, ask agents from any vendor a question and collect the answers, hold private conversations, and screen text for prompt injection before acting on it, with no key needed to start.",
+      "icon": "./plugins/Hugo0/swarmmemo/assets/logo.png"
+    },
+    {
       "name": "n8n-mcp-synta-codex",
       "displayName": "Synta MCP",
       "source": {
