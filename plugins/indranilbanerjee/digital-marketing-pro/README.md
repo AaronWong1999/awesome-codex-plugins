@@ -6,17 +6,16 @@ Run `/digital-marketing-pro:engagement` against each brand. Same 12-Part Strateg
 
 Open-source AI marketing plugin — **164 skills, 24 specialist agents, EU AI Act Article 50 ready, Cowork team-persistent**. Built for marketing agencies, in-house teams running 50–200 brands, and consultancies. Installs on **Claude Code** (CLI + IDE), **Anthropic Cowork**, **OpenAI Codex**, **Cursor 2.5+**, **GitHub Copilot CLI**, **Google Antigravity 2.0**, **Hermes Agent**, **OpenClaw**, and **Grok** + 35+ Agent Skills platforms. Created by [Indranil Banerjee](https://indranil.in) · [LinkedIn](https://www.linkedin.com/in/askneelnow/) · [X](https://x.com/askneelnow).
 
-[![Version](https://img.shields.io/badge/version-3.35.3-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-3.35.8-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/indranilbanerjee/digital-marketing-pro?style=flat&logo=github&color=yellow)](https://github.com/indranilbanerjee/digital-marketing-pro/stargazers)
-[![Tests](https://img.shields.io/badge/tests-642%2F642%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-700%2F700%20passing-brightgreen.svg)](tests/)
 [![Platforms](https://img.shields.io/badge/platforms-9%20native%20%2B%2035%20Agent%20Skills-success.svg)](#works-on-40-agent-harnesses-via-the-agent-skills-open-standard)
 [![EU AI Act](https://img.shields.io/badge/EU%20AI%20Act-Article%2050%20ready-darkred.svg)](skills/context-engine/compliance-rules.md)
-[![HOL Guard](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3Dindranil-banerjee%252Fdigital-marketing-pro%26metric%3Dtrust)](https://hol.org/go/guard/indranilbanerjee21?dest=%2Fguard%2Fbilling%3Fpromo%3DGUARD20-INDRANILBANERJEE21%23upgrade&link_id=fc4b1025-e6eb-40bd-b3d7-24a8508c2fd9&utm_source=insights_share&utm_medium=affiliate_cta&utm_campaign=share20)
 
 [![Built by Indranil "Neel" Banerjee — Neelverse Marketing Suite — Sponsor this project](docs/assets/author-banner.svg)](https://github.com/sponsors/indranilbanerjee)
 
-> 🆕 **Just shipped — v3.35.3 (October 11, 2026):** fatigue forecasts count calendar days (a contributor's fix, now taking CTR-only and newest-first histories); rank-monitor reads a SERP snapshot exported from any provider. [What's new](#whats-new) · [Changelog](CHANGELOG.md)
+> 🆕 **Just shipped — v3.35.8 (October 12, 2026):** the command that returns autopilot to propose-only works from any folder, and the script checks cover new folders by default. [What's new](#whats-new) · [Changelog](CHANGELOG.md)
 
 ```bash
 # Install — one line
@@ -196,7 +195,7 @@ Other marketing plugins exist, including Anthropic's own marketing plugin and co
 | AEO / GEO | **A 6-platform audit, including Google AI Mode** |
 | Where it runs | **9 native hosts**: Claude Code, Cowork, Codex, Cursor, Copilot CLI, Antigravity, Hermes, OpenClaw, Grok |
 | Live-write safety | **Single-use approval record for writes it sends itself; MCP writes: typed yes + host prompt** |
-| Tests | **642 stdlib unittest** tests |
+| Tests | **700 stdlib unittest** tests |
 | License | **MIT: no telemetry, no seats** |
 
 ---
@@ -293,7 +292,7 @@ Output: HTTP calls for the 8 executable connectors (Slack, HubSpot, Klaviyo, Sen
 
 ---
 
-## Supported surfaces (v3.35.3)
+## Supported surfaces (v3.35.8)
 
 | Platform | Install command | Manifest path | Status |
 |---|---|---|---|
@@ -315,22 +314,22 @@ Output: HTTP calls for the 8 executable connectors (Slack, HubSpot, Klaviyo, Sen
 
 ## Works on 40+ agent harnesses (via the Agent Skills open standard)
 
-Beyond the 9 surfaces above where we ship a native manifest, DMP's 164 SKILL.md files work out-of-the-box on any agent that adopted the [Agent Skills open standard](https://agentskills.io) (Anthropic-published Dec 2025, 41+ adopters as of June 2026). On each platform below, point it at our `skills/` folder and all 164 marketing skills are immediately discoverable. No platform-specific manifest needed.
+Beyond the 9 surfaces above where we ship a native manifest, DMP's 164 SKILL.md files work out-of-the-box on any agent that adopted the [Agent Skills open standard](https://agentskills.io) (Anthropic-published Dec 2025, 41+ adopters as of June 2026). On each platform below, copy our skill folders (the folders inside `skills/`) into the folder it reads and all 164 marketing skills are discoverable. No platform-specific manifest needed.
 
-**Tier 1 — verified-compatible platforms with explicit Agent Skills install paths:**
+**Platforms that have adopted the Agent Skills standard.** Where a row gives an install hint, it was checked against that tool's own documentation in October 2026; most of these tools read skills from a folder, so the hint names the folder to copy the skill folders into:
 
 | Platform | Vendor | Install hint |
 |---|---|---|
-| [Goose](https://block.github.io/goose) | Block (Square) | `goose skills install github.com/indranilbanerjee/digital-marketing-pro/skills` |
-| [OpenHands](https://openhands.dev) | Open Hands (cloud agents) | Mount this repo's `skills/` via the OpenHands skills config |
-| [OpenCode](https://opencode.ai) | sst | `opencode skills import github:indranilbanerjee/digital-marketing-pro` |
-| [Junie](https://junie.jetbrains.com) | JetBrains | Drop `skills/` into your project; Junie auto-discovers |
-| [Gemini CLI](https://geminicli.com) | Google | `gemini skills add github:indranilbanerjee/digital-marketing-pro` |
-| [Roo Code](https://roocode.com) | Roo Code Inc. | VS Code → Roo settings → Skills → import from URL |
-| [Cline](https://github.com/cline/cline) / [Windsurf](https://windsurf.com) | open-source VS Code agents | Same Agent Skills import flow as Roo |
+| [Goose](https://block.github.io/goose) | Block (Square) | Copy the skill folders into `~/.agents/skills/` (all projects) or `.agents/skills/` (one project) · [docs](https://goose-docs.ai/docs/guides/context-engineering/using-skills/) |
+| [OpenHands](https://openhands.dev) | Open Hands (cloud agents) | Copy the skill folders into the project's `.agents/skills/` · [docs](https://docs.openhands.dev/overview/skills/adding) |
+| [OpenCode](https://opencode.ai) | sst | Copy the skill folders into `.opencode/skills/` (project) or `~/.config/opencode/skills/` (global); `.agents/skills/` and `.claude/skills/` are read too · [docs](https://opencode.ai/docs/skills) |
+| [Junie](https://junie.jetbrains.com) | JetBrains | Copy the skill folders into `.junie/skills/` (project) or `~/.junie/skills/`; Junie CLI also reads `.agents/skills/` in a trusted project, and `/skills` re-scans · [docs](https://junie.jetbrains.com/docs/agent-skills.html) |
+| [Gemini CLI](https://geminicli.com) | Google | Copy the skill folders into `~/.gemini/skills/` (or `~/.agents/skills/`) for all projects, or `.gemini/skills/` for one · [docs](https://geminicli.com/docs/cli/using-agent-skills/) |
+| [Roo Code](https://roocode.com) | Roo Code Inc. | Copy the skill folders into `.roo/skills/` (project) or `~/.roo/skills/` (global); `.agents/skills/` works too · [docs](https://docs.roocode.com/features/skills) |
+| [Cline](https://github.com/cline/cline) / [Windsurf](https://windsurf.com) | open-source VS Code agents | Cline: copy into `.cline/skills/` or `~/.cline/skills/` ([docs](https://docs.cline.bot/customization/skills)). Windsurf: copy into `.devin/skills/` (the legacy `.windsurf/skills/` is still read) ([docs](https://docs.devin.ai/desktop/cascade/skills)) |
 | [Kiro](https://kiro.dev) | Kiro | Spec-driven dev with Agent Skills support |
-| [Amp](https://ampcode.com) | Sourcegraph | `amp skills add github:indranilbanerjee/digital-marketing-pro` |
-| [Letta](https://letta.com) | Letta | Stateful-agents platform — skills load via the Letta SDK |
+| [Amp](https://ampcode.com) | Sourcegraph | Copy the skill folders into `.agents/skills/` (project) or `~/.config/agents/skills/` (this machine) · [docs](https://ampcode.com/manual/agent-skills) |
+| [Letta](https://letta.com) | Letta | Copy the skill folders into `.agents/skills/` (project) or `~/.letta/skills/` (all agents on this machine) · [docs](https://docs.letta.com/letta-agent/skills) |
 | [Mux](https://mux.coder.com) | Coder | Browser-based parallel cloud agents |
 | [Factory](https://factory.ai) | Factory | "Droid" agents read Agent Skills bundles |
 | [Workshop](https://workshop.ai) | Workshop | Multi-LLM cross-platform agent |
@@ -338,7 +337,7 @@ Beyond the 9 surfaces above where we ship a native manifest, DMP's 164 SKILL.md 
 | [Emdash](https://emdash.sh) | General Action | Parallel git-worktree agents |
 | [Superconductor](https://superconductor.com) | Superconductor | Multiplayer cloud agents |
 | [Ona](https://ona.com) | Ona | Background cloud-agent fleet |
-| [Mistral Vibe](https://github.com/mistralai/mistral-vibe) | Mistral AI | `mistral-vibe skills install ...` |
+| [Mistral Vibe](https://github.com/mistralai/mistral-vibe) | Mistral AI | Copy the skill folders into `.vibe/skills/` (project) or `~/.vibe/skills/`; `.agents/skills/` is read too · [docs](https://docs.mistral.ai/vibe/code/cli/skills) |
 | [VT Code](https://github.com/vinhnx/vtcode) | open-source | LLM-native code agent |
 | [Qodo](https://qodo.ai) | Qodo | Code integrity agent |
 | [Piebald](https://piebald.ai) | Piebald | Desktop agentic dev |
@@ -358,14 +357,14 @@ Beyond the 9 surfaces above where we ship a native manifest, DMP's 164 SKILL.md 
 | [Agentman](https://agentman.ai) | Agentman | Healthcare revenue-cycle agents |
 | [Google AI Edge Gallery](https://github.com/google-ai-edge/gallery) | Google | On-device mobile LLM agent |
 
-**Quick test on any Tier-1 platform:**
+**Quick test on any of these platforms:**
 
 ```bash
-# 1. Clone the skills folder (or point your platform at the GitHub raw URL)
+# 1. Clone the repository
 git clone --depth=1 https://github.com/indranilbanerjee/digital-marketing-pro.git
-# 2. Point your agent's skills-config at ./digital-marketing-pro/skills
+# 2. Copy the folders inside ./digital-marketing-pro/skills/ into your tool's skills folder (see the table above)
 # 3. Try: "Run a competitor analysis on stripe.com"
-# Your agent picks /digital-marketing-pro:competitor-analysis automatically.
+# Your agent should pick the competitor-analysis skill.
 ```
 
 **Why we don't ship per-platform manifests for these:** the Agent Skills standard says agents discover by walking a directory tree for `SKILL.md` files — no manifest required. Shipping 35 extra wrapper manifests would create maintenance overhead with zero added value.
@@ -405,17 +404,17 @@ If you run into a platform-specific install snag, file a [GitHub issue](https://
 
 ## What's new
 
-### v3.35.3 — fatigue forecasts count calendar days; SERP snapshots from any provider (October 11, 2026)
+### v3.35.8 — the propose-only command works from any folder (October 12, 2026)
 
-`creative-fatigue-predictor.py` read row numbers as days, so a daily CTR series that had already crossed its fatigue threshold was called "performing steadily" and a weekly series with 28 days of runway was called "URGENT" at 3. Forecasts now use calendar days from the latest row and report a crossed threshold as 0 days; the fix was contributed by @andromia3 (PR #17). The follow-up accepts what real exports look like: no CPM (a CTR-only forecast, with `signals_used`), newest-first rows, ISO timestamps and numeric strings, with every error naming its row. `rank-monitor --features` can now read a SERP snapshot (position, AI Overview presence and citation, People Also Ask, featured-snippet owner) exported from any SERP API or rank tracker, validated by the new stdlib `scripts/serp-snapshot.py`, which reads only that file. 642 tests.
+From the fresh-install smoke test's recheck. PRIVACY.md's command for returning autopilot to propose-only used a relative `scripts/` path that fails from your own project; it now uses the plugin's folder. The check that every script-running file says where the scripts are now covers every document by default instead of a list of folders. Printed commands carry no text after them, so a PowerShell note never swallows it, and a test confirms no script waits for input on Claude Code's open stdin pipe. 700 tests.
 
-### v3.35.2 — every missing-package message prints the exact pinned command (October 10, 2026)
+### v3.35.7 — errors exit non-zero; commands paste into Git Bash (October 12, 2026)
 
-The never-do panel said a missing package prints the exact pinned install command; only C2PA did. Now `_common.PINNED_DEPENDENCIES` pins every optional package (each the newest release at least two weeks old that supports Python 3.10), `scripts/requirements.txt` lists the same exact pins, `setup.py --install` installs from the table, and every missing-package message prints the tested command, including two that said nothing useful before (the AI-visibility checker blamed the API key when its SDK was missing; the UTM QR note gave no command). Proved in fresh Python 3.10 and 3.13 environments. Also fixed, from a claim check of this README against the code: the automation examples (diagnostic returns an MCP manifest; audit-current is an SEO audit; approve needs `--brand`), the OAuth connector count (28, not 25), the output-folder tree (`brands/<slug>/profile.json`, `part-01-…` folders), the check row and the live-write comparison. New guards: `tests/test_pinned_dependencies.py`, connector-count and brand-path checks in `tests/test_doc_counts.py`, and `tests/test_manifest_paths.py`. 613 tests.
+From the fresh-install smoke test's recheck. Fifteen scripts printed an error and exited 0, so a caller checking `$?` read a failure as success: utm-generator (a missing CSV, or a CSV where every row failed), the SEO and local-SEO auditors, the budget, ROI and lifetime-value calculators, the scorers and others. A bad argument now exits 2 and a failure 1; utm-generator exits 3 for a partly failed batch, as its `--help` says. Printed commands use forward slashes, so they run in Git Bash (Claude Code's Bash tool on Windows) as well as PowerShell. 694 tests.
 
-### v3.35.1 — C2PA signing with a prompt works on the current c2pa-python (October 10, 2026)
+### v3.35.6 — quoted paths, BOM-safe inputs, hints that run anywhere (October 12, 2026)
 
-`embed-c2pa.py --prompt` failed to sign on c2pa-python 0.38.0, the version v3.35.0 pins, because the prompt was written as a second `c2pa.opened` action; it now rides on the created action. New `tests/test_c2pa_embed.py` (10 tests) pins v3.35.0's C2PA fixes, which had been verified by hand: no install path, pinned install command and exit 2 when a package is missing, the dev key removed even on failure, the `--verify` exit codes, and the PRIVACY.md disclosures. 585 tests.
+From the fresh-install smoke test's final pass. Five skill commands ran an unquoted `${CLAUDE_PLUGIN_ROOT}` path, which breaks in a folder with a space; every such path is now quoted and a test checks them all. `utm-generator.py --csv` turned Excel's "CSV UTF-8" export into rows of missing URLs (still exiting 0), and `--prepare-batch` refused a plan saved by PowerShell; every script now reads files with or without a BOM and never writes one. Printed hints run a script by the interpreter and its absolute path. 680 tests.
 
 Older releases are in [CHANGELOG.md](CHANGELOG.md).
 
@@ -716,7 +715,7 @@ Yes. Each brand has its own `~/.claude-marketing/brands/<brand-slug>/` directory
 Skip to `/digital-marketing-pro:campaign-plan`. Every individual surface (campaign / SEO / content / competitor / email / report) is independently runnable. The full engagement is the canonical path, not the only path.
 
 **Q: Will this work on Codex / Cursor / Copilot CLI / Antigravity?**
-Yes — verified-real native manifests ship for all 9 surfaces (CC, Cowork, Codex, Cursor, Copilot CLI, Antigravity, Hermes Agent, OpenClaw, Grok). See [Supported surfaces](#supported-surfaces-v3353) above for per-platform install commands.
+Yes — verified-real native manifests ship for all 9 surfaces (CC, Cowork, Codex, Cursor, Copilot CLI, Antigravity, Hermes Agent, OpenClaw, Grok). See [Supported surfaces](#supported-surfaces-v3358) above for per-platform install commands.
 
 **Q: I run my team on Anthropic Cowork. Does brand state persist between sessions?**
 Yes — but you need to run `/digital-marketing-pro:cowork-setup` once per team first (v3.12.0). Cowork's per-session filesystem is ephemeral, and `${CLAUDE_PLUGIN_DATA}` is too ([open issue #51398](https://github.com/anthropics/claude-code/issues/51398)). The setup wizard routes brand profiles + plans + reports through a Google Drive MCP so everything survives across sessions and is shared across the team. Multi-team isolation via per-team folder names.
@@ -789,7 +788,7 @@ Use the direct repo form: `grok plugin install indranilbanerjee/digital-marketin
 ### General (any platform)
 
 **"Tests in `tests/` fail when I `git clone` locally"**
-Run `python tests/run_all.py` from the repo root. All 642 tests are stdlib-only — no `pip install` needed. If they fail, the most likely cause is a Python version mismatch (DMP supports Python 3.10+) or a clone that omitted some `skills/` subdirectories. Try `git clone --depth=1` again.
+Run `python tests/run_all.py` from the repo root. All 700 tests are stdlib-only — no `pip install` needed. If they fail, the most likely cause is a Python version mismatch (DMP supports Python 3.10+) or a clone that omitted some `skills/` subdirectories. Try `git clone --depth=1` again.
 
 **"`/digital-marketing-pro:doctor` shows my action as stub_unconfigured"**
 That action needs an MCP connector configured. Run `python scripts/connector-status.py --action setup-guide --name <connector-name>` for the exact setup snippet. Add it to your `.mcp.json` under `mcpServers`, restart your agent, and the action becomes `manifest_ready`. See [Connector-aware action resolver](#connector-aware-action-resolver) for the full readiness model.

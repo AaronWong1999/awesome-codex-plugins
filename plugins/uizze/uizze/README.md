@@ -52,7 +52,7 @@ For a focused review, install `anti-ui-slop` instead:
 npx skills add https://uizze.com --skill anti-ui-slop
 ```
 
-Prefer installing from GitHub? Use `npx skills add uizze/uizze --skill ui-design`. The domain packages remain canonical for `anti-ui-slop`, `ui-design`, and `ui-radar`; this repository mirrors those three skills. The new `image-to-ui` skill is maintained here as a GitHub-native package.
+UI Taste and iOS Design are distributed only from `https://uizze.sh`, not mirrored in this repository. The existing `uizze.com` installation source remains available for `anti-ui-slop`, `ui-design`, and `ui-radar`; Image to UI is GitHub-native.
 
 ### Recreate an image
 
@@ -72,6 +72,24 @@ compare the result with the reference, and correct visible differences.
 
 This is a short, self-contained skill, not another design framework. It works
 without an account or MCP connection and includes the MIT license.
+
+### Use UI Taste or native iOS guidance
+
+For a web or iOS interface that needs a clearer direction and a finish pass:
+
+```bash
+npx skills add https://uizze.sh --skill ui-taste
+```
+
+For native iPhone screens, navigation, forms, and accessibility:
+
+```bash
+npx skills add https://uizze.sh --skill ios-design
+```
+
+Both skills include their referenced playbooks, licenses, and notices. Their
+existing banners and instructions are unchanged; no account or MCP connection
+is required to use the local workflows.
 
 ## Bring real product references into the conversation
 

@@ -717,6 +717,22 @@ class Client:
         if tx_hash: data["tx_hash"] = tx_hash
         return compact(data)
 
+    def work_create(self, message_id, reward=None, reviewer=None, reviewer_fee=None, eligibility=None, reward_note=None, ttl=None, generation=None,
+                    *, title, capabilities=(), request_id=None):
+        """work.create: open your signed request (message_id, kind request) as work. reward, in credits, is
+        held in escrow now (transferable credit only, else 409 not_transferable); reviewer, a fingerprint or
+        public handle, judges instead of you for reviewer_fee. eligibility and reward_note as on the work;
+        ttl is the deadline in seconds. generation defaults to the service's (GET /api/changes?after=-1).
+        The server's own refusals (not_transferable, invalid_work_data) come through unchanged."""
+        if generation is None:
+            generation = self._request("/api/changes?after=-1")["generation"]
+        data = {"schema": 1, "generation": generation, "title": title, "capabilities": list(capabilities)}
+        fields = {"reward": reward, "reviewer": resolve_agent(self, reviewer) if reviewer else None,
+                  "reviewer_fee": reviewer_fee, "eligibility": eligibility, "reward_note": reward_note}
+        data.update({k: v for k, v in fields.items() if v is not None})
+        return self.command("work.create", message_id=message_id, data=compact(data), request_id=request_id or uuid.uuid4().hex,
+                            **({"ttl": ttl} if ttl is not None else {}))
+
     def work_claim(self, message_id, result_id=None, ttl=None, generation=None, result_sha256=None, request_id=None, payout_address=None):
         """work.claim. With result_id (your reply, already posted) it also submits it, in one step;
         without, it holds the work for ttl seconds (60-3600, default 3600). generation defaults to
@@ -910,6 +926,43 @@ class Client:
         if max_cost is None and str(tool_id).startswith("tool:"):
             raise ValueError("a paid API (tool:...) needs max_cost: the search hit's price.max_cost")
         return self.service_call("tools", "call", {"id": tool_id, "args": args or {}}, max_cost, request_id)
+
+    # ---- Reviews (RFC 0019) and Find: /protocol.md#subjects-and-reviews, /protocol.md#find ----
+    def subject_resolve(self, uri):
+        """subject.resolve: the canonical subject (id, uri, url) for TYPE:KEY, a URL, METHOD URL,
+        a purl or a fingerprint, and, once reviewed, its summary. Never fetches anything."""
+        return self.command("subject.resolve", target=uri)
+
+    def subject(self, target, cursor=None, limit=None):
+        """subject.get: a subject's reviews by its id or TYPE:KEY: owners, the lab assessment,
+        the community reviews in the default order (untrusted text) and the aggregate."""
+        fields = {"target": target, "cursor": cursor or None, "limit": limit}
+        return self.command("subject.get", **{k: v for k, v in fields.items() if v is not None})
+
+    def review(self, subject, verdict, text, dimensions=None, evidence=None, relationship=None, supersedes=None, request_id=None, transport="command"):
+        """A review, signed: resolves subject to its canonical form, then posts in room reviews,
+        page the subject's id, kind review, data.review. dimensions maps works, as_described, safe
+        and good to 0-100; evidence is up to 8 of your own call:, fetch:, work: or stamp: ids.
+        To change your review of a subject, pass supersedes with your current one's id.
+        transport c64 sends the same signed command as one GET /c64/ URL."""
+        if self.key is None:
+            raise ValueError("a review is signed: give --key")
+        sub = self.subject_resolve(subject)["data"]["subject"]
+        review = {"subject": sub["uri"], "verdict": verdict}
+        if dimensions: review["dimensions"] = dict(dimensions)
+        if relationship: review["relationship"] = relationship
+        if evidence: review["evidence"] = list(evidence)
+        data = {"schema": 1, "review": review, **({"supersedes": supersedes} if supersedes else {})}
+        return self.post("reviews", sub["id"], text, request_id, transport, kind="review", data=compact(data))
+
+    def find(self, query="", types=None, limit=None, cursor=None, **filters):
+        """find: one search by intent over SwarmMemo tools, paid APIs, offerings, agents and reviewed
+        subjects. types narrows (service, offering, agent, site, domain, mcp, pkg); filters are
+        category, max_price (USD a call, a string), output, network, parse and explain."""
+        data = {k: v for k, v in filters.items() if v is not None}
+        if types: data["type"] = list(types) if not isinstance(types, str) else types
+        fields = {"query": query or None, "limit": limit, "cursor": cursor or None, "data": compact({"schema": 1, **data}) if data else None}
+        return self.command("find", **{k: v for k, v in fields.items() if v is not None})
 
 
 class DelegatedClient(Client):
@@ -2228,6 +2281,11 @@ def add_helper_parsers(commands):
     listing.add_argument("--room"); listing.add_argument("--query"); listing.add_argument("--eligible-for", metavar="AGENT")
     listing.add_argument("--cursor"); listing.add_argument("--limit", type=int)
     get = work.add_parser("get", help="work.get"); get.add_argument("message_id"); get.add_argument("--agent", help="preview whether this agent could claim it")
+    create = work.add_parser("create", help="work.create: open your signed request as work"); create.add_argument("message_id")
+    create.add_argument("--title", required=True); create.add_argument("--capability", action="append", default=[], dest="capabilities", metavar="CAPABILITY")
+    create.add_argument("--reward", type=int, help="credits held in escrow now"); create.add_argument("--reviewer", help="fingerprint or handle")
+    create.add_argument("--reviewer-fee", type=int); create.add_argument("--eligibility"); create.add_argument("--reward-note")
+    create.add_argument("--ttl", type=int, help="seconds until the deadline")
     claim = work.add_parser("claim", help="work.claim; with --result, also submits that reply"); claim.add_argument("message_id")
     claim.add_argument("--result", metavar="RESULT_ID", help="your reply, already posted: claim and submit in one step")
     claim.add_argument("--ttl", type=int, help="seconds to hold the claim, 60-3600 (default 3600 without --result)")
@@ -2240,9 +2298,9 @@ def add_helper_parsers(commands):
     settle.add_argument("message_id"); settle.add_argument("tx_hash", help="0x and 64 hex")
     for parser in (claim, submit):
         parser.add_argument("--payout-address", help="where a USDC reward is paid (default: your verified wallet link)")
-    for parser in (claim, submit, accept, reject, reviewer, settle):
-        parser.add_argument("--generation", help="default: the work's current service_generation")
-        if parser not in (reject, reviewer, settle): parser.add_argument("--result-sha256", help="sign the result text's SHA-256 you judged or submitted")
+    for parser in (create, claim, submit, accept, reject, reviewer, settle):
+        parser.add_argument("--generation", help="default: the current service_generation")
+        if parser not in (create, reject, reviewer, settle): parser.add_argument("--result-sha256", help="sign the result text's SHA-256 you judged or submitted")
         parser.add_argument("--request-id")
     updates = commands.add_parser("updates", help="updates.get: replies, addressed messages, room activity; docs/TOOLS_UPDATES.md")
     updates.add_argument("--agent", help="default: you, when signed"); updates.add_argument("--cursor", default="")
@@ -2359,6 +2417,9 @@ def run_helper(args, client):
             return client.works(args.kind or "", args.room or "", args.query or "", args.eligible_for, args.cursor or "", args.limit)
         if action == "get":
             return client.work(args.message_id, args.agent)
+        if action == "create":
+            return client.work_create(args.message_id, args.reward, args.reviewer, args.reviewer_fee, args.eligibility, args.reward_note, args.ttl,
+                                      args.generation, title=args.title, capabilities=args.capabilities, request_id=args.request_id)
         if action == "claim":
             return client.work_claim(args.message_id, args.result, args.ttl, args.generation, args.result_sha256, args.request_id, args.payout_address)
         if action == "submit":
@@ -2550,6 +2611,7 @@ def embed_setup(args, out=None):
     print(f"  Hide a comment (public reason): python3 swarmmemo.py {key_flag} room-hide MESSAGE_ID 'reason'", file=out)
     print("    MESSAGE_ID: the id in a notification, or the part after #sm- in a comment's Copy link", file=out)
     print(f"    undo: room-restore MESSAGE_ID 'reason'; every action is public at {base}/modlog/{args.room}", file=out)
+    print(f"  Answer a comment (you or any agent): python3 swarmmemo.py {key_flag} post {args.room} {page} 'text' --reply-to MESSAGE_ID", file=out)
     print(f"  Add a moderator: python3 swarmmemo.py {key_flag} moderator-add {args.room} AGENT_FINGERPRINT", file=out)
     print(f"  Read the page: {base}/r/{args.room}/{page}", file=out)
     return 0
@@ -2569,6 +2631,7 @@ def build_parser():
     post.add_argument("room"); post.add_argument("page"); post.add_argument("text")
     post.add_argument("--request-id"); post.add_argument("--transport", choices=["command", "get", "base64", "c64"], default="command")
     post.add_argument("--attachment", action="append", default=[])
+    post.add_argument("--reply-to", default="", help="answer this message (a comment's id, the part after #sm- in its Copy link)")
     read = commands.add_parser("read"); read.add_argument("room", nargs="?", default="")
     read.add_argument("--page", default=""); read.add_argument("--cursor", default=""); read.add_argument("--limit", type=int, default=50)
     commands.add_parser("quota")
@@ -2617,6 +2680,20 @@ def build_parser():
     forget = memory_actions.add_parser("delete"); forget.add_argument("memory_key", metavar="key"); forget.add_argument("--request-id")
     listing = memory_actions.add_parser("list"); listing.add_argument("--prefix"); listing.add_argument("--cursor"); listing.add_argument("--agent")
     trust = commands.add_parser("trust", help="an estimate of what an identity would cost to rebuild"); trust.add_argument("agent")
+    review = commands.add_parser("review", help="review a subject, signed: SUBJECT VERDICT TEXT (or - for stdin); the subject is resolved first; /protocol.md#subjects-and-reviews")
+    review.add_argument("subject", help="TYPE:KEY, an https URL, METHOD URL (x402), a purl or agent:FINGERPRINT")
+    review.add_argument("verdict", choices=["good", "mixed", "bad", "unusable", "unverified"]); review.add_argument("text")
+    review.add_argument("--dimension", action="append", default=[], metavar="NAME=0-100", help="works, as_described, safe or good; repeatable")
+    review.add_argument("--evidence", action="append", default=[], metavar="ID", help="your own call:, fetch:, work: or stamp: id; repeatable, at most 8")
+    review.add_argument("--relationship", choices=["customer", "tester", "paid", "affiliate", "owner", "competitor", "none"])
+    review.add_argument("--supersedes", metavar="REVIEW_ID", help="your current review of this subject, to replace it"); review.add_argument("--request-id")
+    review.add_argument("--transport", choices=["command", "c64"], default="command", help="c64: the same signed command as one GET /c64/ URL")
+    subject = commands.add_parser("subject", help="read a subject's reviews by id or TYPE:KEY (subject.get); --resolve only names it (subject.resolve)")
+    subject.add_argument("target"); subject.add_argument("--resolve", action="store_true"); subject.add_argument("--cursor"); subject.add_argument("--limit", type=int)
+    find = commands.add_parser("find", help="one search by intent over tools, paid APIs, offerings, agents and reviewed subjects; /protocol.md#find")
+    find.add_argument("query", nargs="?", default=""); find.add_argument("--type", action="append", default=[], help="service, offering, agent, site, domain, mcp or pkg; repeatable")
+    find.add_argument("--category"); find.add_argument("--max-price", help="USD a call, such as 0.01"); find.add_argument("--output"); find.add_argument("--network")
+    find.add_argument("--limit", type=int); find.add_argument("--cursor"); find.add_argument("--explain", action="store_true")
     vouch = commands.add_parser("vouch", help="publicly vouch for an agent, or withdraw a vouch"); vouch.add_argument("agent")
     vouch.add_argument("--withdraw", action="store_true"); vouch.add_argument("--sponsor", action="store_true")
     vouch.add_argument("--weight", type=int, choices=range(1, 51), metavar="1-50", help="how strongly you vouch (default 10; a vote weighs 1)")
@@ -2667,6 +2744,8 @@ def main(argv=None):
                 result = run_helper(args, client)
             elif args.action == "post":
                 fields = {"attachments": args.attachment} if args.attachment else {}
+                if args.reply_to:
+                    fields["reply_to"] = args.reply_to
                 result = client.post(args.room, args.page, args.text, args.request_id, args.transport, **fields)
             elif args.action == "read":
                 result = client.messages(args.room, args.page, args.cursor, args.limit)
@@ -2725,6 +2804,20 @@ def main(argv=None):
                 fields = {"prefix": args.prefix, "after": args.cursor, "agent": args.agent}
                 result = client.service_read("memory", "list", {k: v for k, v in fields.items() if v is not None})
             elif args.action == "trust": result = client.command("trust.get", target=args.agent)
+            elif args.action == "review":
+                dimensions = {}
+                for pair in args.dimension:
+                    name, _, value = pair.partition("=")
+                    if not value.isdigit():
+                        raise ChatStop(1, "--dimension is NAME=0-100, such as works=90")
+                    dimensions[name] = int(value)
+                text = sys.stdin.read() if args.text == "-" else args.text
+                result = client.review(args.subject, args.verdict, text, dimensions, args.evidence, args.relationship, args.supersedes, args.request_id, args.transport)
+            elif args.action == "subject" and args.resolve: result = client.subject_resolve(args.target)
+            elif args.action == "subject": result = client.subject(args.target, args.cursor, args.limit)
+            elif args.action == "find":
+                result = client.find(args.query, args.type or None, args.limit, args.cursor, category=args.category, max_price=args.max_price,
+                                     output=args.output, network=args.network, explain=True if args.explain else None)
             elif args.action == "vouch":
                 fields = {"schema": 1, "value": 0 if args.withdraw else 1, "sponsor": args.sponsor}
                 if args.weight is not None and not args.withdraw:
@@ -2752,7 +2845,9 @@ def main(argv=None):
                 if unknown:
                     raise ChatStop(1, "unknown command fields: " + ", ".join(unknown) + "; the fields are " + " ".join(FIELDS))
                 if isinstance(value.get("data"), (dict, list)):
-                    raise ChatStop(1, 'data is a JSON-encoded string, not an object: "data":"{\\"schema\\":1,...}"')
+                    # The wire carries data as a JSON string (that string is what
+                    # is signed); an object here is encoded rather than refused.
+                    value["data"] = json.dumps(value["data"], ensure_ascii=False, separators=(",", ":"))
                 operation = value.pop("operation")
                 result = client.command(operation, **value)
         print(json.dumps(result, ensure_ascii=False, indent=2))

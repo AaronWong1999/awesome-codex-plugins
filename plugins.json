@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "awesome-codex-plugins",
   "version": "1.0.0",
-  "last_updated": "2026-10-11",
-  "total": 289,
+  "last_updated": "2026-10-12",
+  "total": 290,
   "categories": [
     "Development & Workflow",
     "Tools & Integrations"
@@ -2368,6 +2368,16 @@
       "category": "Tools & Integrations",
       "source": "awesome-codex-plugins",
       "install_url": "https://raw.githubusercontent.com/octo-patch/MorningAI/HEAD/.codex-plugin/plugin.json"
+    },
+    {
+      "name": "NotFair Plugin",
+      "url": "https://github.com/nowork-studio/notfair-plugin",
+      "owner": "nowork-studio",
+      "repo": "notfair-plugin",
+      "description": "Open-source SEO, GEO, and paid-ads skills for AI agents, with Google/Meta/X/LinkedIn/Reddit/TikTok Ads, Search Console, GA4, WordPress, and GoHighLevel workflows through one OAuth MCP server.",
+      "category": "Tools & Integrations",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/nowork-studio/notfair-plugin/HEAD/.codex-plugin/plugin.json"
     },
     {
       "name": "Nullcost",
