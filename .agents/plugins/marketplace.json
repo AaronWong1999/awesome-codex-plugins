@@ -1399,6 +1399,21 @@
       "icon": "./plugins/JoseEstevez520/mcp-md-reader/assets/icon.svg"
     },
     {
+      "name": "codex-multiple-env",
+      "displayName": "Masaka for Codex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/masakaai/codex-multiple-env"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Development & Workflow",
+      "description": "Keeps each ChatGPT account and workspace in an isolated `CODEX_HOME`, shows official usage windows, and selects the identity used by the next native Codex process.",
+      "icon": "./plugins/masakaai/codex-multiple-env/assets/icon.png"
+    },
+    {
       "name": "memoire",
       "displayName": "memi",
       "source": {

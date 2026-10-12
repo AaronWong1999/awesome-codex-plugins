@@ -3,7 +3,7 @@
   "name": "awesome-codex-plugins",
   "version": "1.0.0",
   "last_updated": "2026-10-12",
-  "total": 290,
+  "total": 291,
   "categories": [
     "Development & Workflow",
     "Tools & Integrations"
@@ -948,6 +948,16 @@
       "category": "Development & Workflow",
       "source": "awesome-codex-plugins",
       "install_url": "https://raw.githubusercontent.com/JoseEstevez520/mcp-md-reader/HEAD/.codex-plugin/plugin.json"
+    },
+    {
+      "name": "Masaka for Codex",
+      "url": "https://github.com/masakaai/codex-multiple-env",
+      "owner": "masakaai",
+      "repo": "codex-multiple-env",
+      "description": "Keeps each ChatGPT account and workspace in an isolated `CODEX_HOME`, shows official usage windows, and selects the identity used by the next native Codex process.",
+      "category": "Development & Workflow",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/masakaai/codex-multiple-env/HEAD/.codex-plugin/plugin.json"
     },
     {
       "name": "memi",
