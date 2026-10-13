@@ -3969,6 +3969,21 @@
       "icon": "./plugins/droplinked/storyflo-codex-plugin/assets/icon.png"
     },
     {
+      "name": "swapwallet",
+      "displayName": "SwapWallet",
+      "source": {
+        "source": "local",
+        "path": "./plugins/SwapWallet/swapwallet-mcp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Official SwapWallet plugin: read crypto balances, P&L and history, and request swaps, transfers and withdrawals that run only after the user approves them in Telegram, over a hosted OAuth MCP server.",
+      "icon": "./plugins/SwapWallet/swapwallet-mcp/assets/icon-256.png"
+    },
+    {
       "name": "swarmmemo",
       "displayName": "SwarmMemo",
       "source": {
