@@ -109,6 +109,21 @@
       "icon": "./plugins/1139030773-cmd/agent-workflow-system/assets/composer-icon.svg"
     },
     {
+      "name": "agentic-readiness-assessment",
+      "displayName": "Agentic Readiness Assessment",
+      "source": {
+        "source": "local",
+        "path": "./plugins/exadel-inc/agentic-readiness-assessment"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Development & Workflow",
+      "description": "Assess repository readiness for AI coding agents with an evidence-based scorecard and prioritized fixes.",
+      "icon": "./plugins/exadel-inc/agentic-readiness-assessment/logo.png"
+    },
+    {
       "name": "codiris-agentizer",
       "displayName": "Agentizer",
       "source": {
