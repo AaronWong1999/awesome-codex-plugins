@@ -3,7 +3,7 @@
   "name": "awesome-codex-plugins",
   "version": "1.0.0",
   "last_updated": "2026-10-13",
-  "total": 293,
+  "total": 294,
   "categories": [
     "Development & Workflow",
     "Tools & Integrations"
@@ -2608,6 +2608,16 @@
       "category": "Tools & Integrations",
       "source": "awesome-codex-plugins",
       "install_url": "https://raw.githubusercontent.com/ScrapeGraphAI/just-scrape/HEAD/.codex-plugin/plugin.json"
+    },
+    {
+      "name": "sectionsight",
+      "url": "https://github.com/Majny/sectionsight",
+      "owner": "Majny",
+      "repo": "sectionsight",
+      "description": "Sets up cookieless, privacy-first website analytics (time per page section, consent banner, Slack or e-mail reports, health alerts) and proves the privacy claims with a headless-browser check.",
+      "category": "Tools & Integrations",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/Majny/sectionsight/HEAD/.codex-plugin/plugin.json"
     },
     {
       "name": "SEO Dungeon",

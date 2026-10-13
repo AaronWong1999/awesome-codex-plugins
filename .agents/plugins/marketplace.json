@@ -3850,6 +3850,21 @@
       "icon": "./plugins/ScrapeGraphAI/just-scrape/assets/icon.svg"
     },
     {
+      "name": "sectionsight",
+      "displayName": "sectionsight",
+      "source": {
+        "source": "local",
+        "path": "./plugins/Majny/sectionsight"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Sets up cookieless, privacy-first website analytics (time per page section, consent banner, Slack or e-mail reports, health alerts) and proves the privacy claims with a headless-browser check.",
+      "icon": "./plugins/Majny/sectionsight/assets/icon.svg"
+    },
+    {
       "name": "legends-seo-dungeon",
       "displayName": "SEO Dungeon",
       "source": {
