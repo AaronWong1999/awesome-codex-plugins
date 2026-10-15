@@ -86,14 +86,8 @@ def remediation_comment(
     failure_lines = [item for item in reasons if isinstance(item, str)] if isinstance(reasons, list) else []
     details = " ".join(failure_lines) if failure_lines else summary
     if result.get("state") == "scan":
-        contributions = result.get("contributions")
-        missing_scanner = any(
-            isinstance(item, dict) and item.get("scanner_ci") == "not_detected"
-            for item in (contributions if isinstance(contributions, list) else [])
-        )
         guidance = "Resolve the scan failure and rerun the centralized scan; listing requires a completed score of at least 80."
-        if missing_scanner:
-            guidance += " If the score is below 80, adding source-repository scanner CI is recommended, not required: use the SHA-pinned workflow in the scanner guide, reproduce locally, run the same pinned scanner in source CI, fix or document rule findings, link the source run, rerun the catalog scan, and request review."
+        guidance += " If the completed score is below 80 and your source repository does not already run the scanner, source-repository scanner CI is recommended, not required: use the SHA-pinned workflow in the scanner guide, reproduce locally, run the same pinned scanner in CI, fix or document rule-level findings, link the source run, rerun the catalog scan, and request review."
         return PUBLISHER.one_paragraph(
             f"{marker} {details} {guidance} Source-repository scanner CI is optional. [Latest sweep]({run_url})."
         )

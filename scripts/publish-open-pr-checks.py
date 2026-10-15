@@ -172,13 +172,8 @@ def remediation_comment(
     if malformed_readme:
         guidance = "Use one root-level repository link, a one-sentence description, the correct section, and alphabetical order, then rerun the check."
     elif result.get("state") == "scan":
-        missing_scanner = any(
-            isinstance(item, dict) and item.get("scanner_ci") == "not_detected"
-            for item in (result.get("contributions") if isinstance(result.get("contributions"), list) else [])
-        )
         guidance = "Review the scanner report and rerun the centralized scan."
-        if missing_scanner:
-            guidance += " If the confirmed score is below 80, adding source-side CI is recommended, not required: use the SHA-pinned workflow in the scanner guide, reproduce locally, fix or document rule findings, link the source run, rerun the catalog scan, and request review."
+        guidance += " If the completed score is below 80 and your source repository does not already run the scanner, source-side CI is recommended, not required: use the SHA-pinned workflow in the scanner guide, reproduce locally, run the same pinned scanner in CI, fix or document rule-level findings, link the source run, rerun the catalog scan, and request review."
     else:
         guidance = "Fix the catalog validation findings and rerun the contribution check."
 

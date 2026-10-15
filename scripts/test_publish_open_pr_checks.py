@@ -29,7 +29,7 @@ class CentralizedPublisherTests(unittest.TestCase):
             "author_login": "contributor",
             "state": "scan",
             "failure_reasons": [],
-            "contributions": [{"scanner_ci": "not_detected"}],
+            "contributions": [{"owner": "example", "repo": "plugin"}],
         }
 
     def test_completed_scan_meeting_score_gate_passes_with_advisories(self) -> None:
@@ -59,6 +59,7 @@ class CentralizedPublisherTests(unittest.TestCase):
             if conclusion == "failure":
                 self.assertIn("recommended, not required", comment)
                 self.assertIn("score is below 80", comment)
+                self.assertIn("source repository does not already run the scanner", comment)
 
     def test_no_new_entry_success_comment_does_not_claim_a_score(self) -> None:
         result = {**self.scan_result, "state": "success"}
@@ -101,6 +102,7 @@ class CentralizedPublisherTests(unittest.TestCase):
         )
         self.assertNotIn("\n", comment)
         self.assertIn("Source-repository scanner CI is optional", comment)
+        self.assertIn("source repository does not already run the scanner", comment)
 
 
 if __name__ == "__main__":
