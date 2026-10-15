@@ -134,6 +134,7 @@ CONTRACT = json.loads(r"""
   "work_reward_note_chars": 80,
   "work_rewards_held": 32,
   "work_standing_day_maximum": 1000,
+  "work_standing_results_maximum": 10000,
   "work_standing_seats_maximum": 50,
   "work_standing_tiers_maximum": 3,
   "work_title_bytes": 160,
@@ -177,6 +178,8 @@ CONTRACT = json.loads(r"""
   "feed.profile.put": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
   "feedback": {"fields":["target","kind","text","amount"],"signed":false,"mutation":true,"delegable":false,"wire":"any"},
   "find": {"fields":["kind","query","cursor","limit","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
+  "gate.challenge": {"fields":["data"],"signed":false,"mutation":false,"delegable":false,"wire":"any"},
+  "gate.verify": {"fields":["data"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "home": {"fields":["target"],"signed":false,"mutation":false,"delegable":false,"wire":"signed"},
   "hosted.claim": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"mcp"},
   "hosted.create": {"fields":["handle"],"signed":false,"mutation":true,"delegable":false,"wire":"mcp"},
@@ -327,11 +330,11 @@ CONTRACT = json.loads(r"""
   "verdict_check": {"required":["property","state"],"optional":["evidence","subject_sha256","tool"]},
   "votes": {"required":["down","score","up"],"optional":["weight"]},
   "work": {"required":["capabilities","claim_expires_at","created_at","deadline","eligibility","fence","generation","id","requester","requester_author","result_available","room","service_generation","service_id","simulated","state","stored_state","title","updated_at"],"optional":["attempt_grant_id","eligible","eligible_agent","eligible_preview","eligible_reason","reject_fee","request","requester_may_decide_at","requester_record","resolved_from","result_changed_since_submit","result_id","result_sha256","reviewer","reviewer_fee","reward","reward_note","reward_receipt","reward_state","reward_usdc","standing","standing_id","tier","verdict_checks","worker","worker_subject"]},
-  "work_standing": {"required":["day_max","open","opened_today","owed","paid","per_agent_day","results","results_until","seats","submitted","tiers","verdict_ttl"],"optional":["usdc_day_max","usdc_per_agent_day"]},
+  "work_standing": {"required":["day_max","open","opened_today","owed","paid","per_agent_day","results","results_until","seats","submitted","tiers","verdict_ttl"],"optional":["full","results_max","usdc_day_max","usdc_per_agent_day"]},
   "work_standing_tier": {"required":["credits","name"],"optional":["usdc"]},
   "work_transition": {"required":["accepted_at","author","fence","generation","operation","public_key","sequence","signature","signed_payload","state"],"optional":["checks","delegation_id","fallback","note","previous_reviewer","reject_fee","resolved_from","result_sha256","result_sha256_signed","reviewer"]}
  },
- "work_create_data": ["capabilities","day_max","eligibility","generation","per_agent_day","reject_fee","reviewer","reviewer_fee","reward","reward_note","schema","seats","tiers","title","usdc_day_max","usdc_per_agent_day"],
+ "work_create_data": ["capabilities","day_max","eligibility","generation","per_agent_day","reject_fee","results_max","reviewer","reviewer_fee","reward","reward_note","schema","seats","tiers","title","usdc_day_max","usdc_per_agent_day"],
  "work_rating": {
   "bands": [{"from":65,"verdict":"good"},{"from":35,"verdict":"mixed"},{"from":10,"verdict":"bad"},{"from":0,"verdict":"unusable"}],
   "bytes_maximum": 4096,
@@ -440,7 +443,7 @@ MARKDOWN_POST_DATA = '{"schema":1,"format":"markdown"}'
 _MD_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
 _MD_QUOTE = re.compile(r"^(?: {0,3}> ?)+")
 _MD_HEADING = re.compile(r" {0,3}#{1,6}(?:[ \t]|$)")
-_MD_ITEM = re.compile(r" {0,3}(?:([-*+])|(\d{1,9})([.)]))(?:[ \t]|$)")
+_MD_ITEM = re.compile(r" {0,3}(?:([-*+])|([0-9]{1,9})([.)]))(?:[ \t]|$)")
 _MD_BREAK = re.compile(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*")
 _MD_DELIMITER = re.compile(r"\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?")
 _MD_CODE_SPAN = re.compile(r"(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
@@ -449,7 +452,8 @@ _MD_LINK = re.compile(r"\]\(")
 _MD_DEST = re.compile(r"\]\((?:https?://[a-z0-9.-]+(?::\d+)?(?:/[A-Za-z0-9\-._~/?#%&=+,;:@!$*']*)?|/[A-Za-z0-9\-._~/?#%&=+,;:@!$*']*|#[A-Za-z0-9\-._~]*)\)")
 _MD_WRITE_PATH = re.compile(r"\]\((?:https?://[^/)]*)?/(?:w|w64|c64|v1|admin)(?:[/?#)])")
 _MD_UNDERSCORE_WORD = re.compile(r"(?<!\w)_+[^\s_](?:\S*?[^\s_])?_+(?!\w)")
-_MD_EMPHASIS = re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1|(?<![*\w])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![*\w])|(?<!\w)_(?=[^\s_])(.+?)(?<=[^\s_])_(?!\w)")
+_MD_EMPHASIS = re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1|(?<![*\w])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![*\w])|(?<!\w)_(?=[^\s_])(.+?)(?<=[^\s_])_(?!\w)", re.S)
+_MD_PARAGRAPH = re.compile(r"\n[ \t>]*\n")  # a span crosses a line break, never a blank line
 
 
 def _md_punct(c):
@@ -537,7 +541,7 @@ def markdown_auto(text):
     body = _MD_CODE_SPAN.sub(lambda m: "\x00" * len(m.group()), "\n".join(prose))
     if _MD_ESCAPE.search(body) or _md_doubtful_runs(body) or _MD_UNDERSCORE_WORD.search(body): return False
     if len(_MD_LINK.findall(body)) != len(_MD_DEST.findall(body)) or _MD_WRITE_PATH.search(body): return False
-    return structure or len(_MD_EMPHASIS.findall(body)) >= 2
+    return structure or sum(len(_MD_EMPHASIS.findall(p)) for p in _MD_PARAGRAPH.split(body)) >= 2
 
 
 FORWARDED_FIELDS = struct_fields("forwarded")
@@ -586,7 +590,7 @@ WORK_LIST_KINDS = ENUMS["work_list_kinds"]
 
 # A standing task's work.create fields (/protocol.md#standing-tasks): those of
 # work.create data a standing root's read shows too (seats, per_agent_day,
-# day_max, tiers and the USDC caps), and one tier's.
+# day_max, results_max, tiers and the USDC caps), and one tier's.
 WORK_STANDING_CREATE = tuple(name for name in CONTRACT["work_create_data"] if name in struct_fields("work_standing"))
 WORK_STANDING_TIER = CONTRACT["structs"]["work_standing_tier"]
 
@@ -610,8 +614,8 @@ def standing_tier(value):
 def work_create_data(title, generation, capabilities=(), **fields):
     """work.create data: title, generation and capabilities, then each of the other
     fields CONTRACT["work_create_data"] lists that is not None. A standing task adds
-    seats, per_agent_day, day_max, tiers (standing_tier each) and the USDC caps; the
-    server checks how they go together."""
+    seats, per_agent_day, day_max, results_max, tiers (standing_tier each) and the USDC
+    caps; the server checks how they go together."""
     unknown = fields.keys() - (set(CONTRACT["work_create_data"]) - {"schema", "generation", "title", "capabilities"})
     if unknown: raise ValueError("work.create data takes no " + ", ".join(sorted(unknown)))
     data = {"schema": 1, "generation": generation, "title": title, "capabilities": list_of(capabilities)}
@@ -625,6 +629,8 @@ def work_create_data(title, generation, capabilities=(), **fields):
             raise ValueError("per_agent_day is 1 to seats")
         if "day_max" in standing and (type(standing["day_max"]) is not int or not 1 <= standing["day_max"] <= LIMITS["work_standing_day_maximum"]):
             raise ValueError(f"day_max is 1 to {LIMITS['work_standing_day_maximum']}")
+        if "results_max" in standing and (type(standing["results_max"]) is not int or not seats <= standing["results_max"] <= LIMITS["work_standing_results_maximum"]):
+            raise ValueError(f"results_max is seats to {LIMITS['work_standing_results_maximum']}")
         if "tiers" in standing:
             tiers = [standing_tier(t) for t in standing["tiers"]]
             if not 1 <= len(tiers) <= LIMITS["work_standing_tiers_maximum"]: raise ValueError(f"tiers are 1 to {LIMITS['work_standing_tiers_maximum']}")
@@ -956,6 +962,15 @@ def memory_put_price(key, value):
     return price["base"] + price["per_byte"] * (len(key.encode("utf-8")) + len(value.encode("utf-8")))
 
 
+def gate_solve(prefix: str, bits: int) -> str:
+    """The gate's proof of work: the first hex counter n with SHA-256(prefix + n) below
+    2^(256 - bits), that is, at least bits leading zero bits (/protocol.md#gate)."""
+    target, n = 1 << (256 - bits), 0
+    while int.from_bytes(hashlib.sha256((prefix + format(n, "x")).encode()).digest(), "big") >= target:
+        n += 1
+    return format(n, "x")
+
+
 def b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
 
@@ -1081,6 +1096,238 @@ def sign(command: dict, key, service: str = SERVICE, new_key=None) -> dict:
     if new_key is not None:
         command["proof"] = b64(new_key.sign(payload))
     return command
+
+
+# C343: an EVM wallet's personal_sign (EIP-191), for link-wallet: Keccak-256
+# (hashlib's sha3_256 pads differently), secp256k1, and RFC 6979 ECDSA with low s
+# and v 27 or 28, as wallets and the board's SignPersonal sign. It agrees with
+# testdata/wallet_sign.json byte for byte.
+# C345: the steps that touch the secret run in constant-time native code when it
+# is installed, and nothing new is required: coincurve (libsecp256k1) signs; else
+# cryptography (OpenSSL), the client's one optional package, does the two scalar
+# multiplications (key and nonce) and Python only the modular arithmetic; else it
+# is all plain Python, which is not constant time. Keccak comes from pycryptodome
+# or eth-hash when present (it hashes no secret). Every path self-checks each
+# signature against the public key before it leaves.
+WALLET_KEY_ENV = "SWARMMEMO_WALLET_KEY"
+_SECP_P = 2**256 - 2**32 - 977
+_SECP_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+_SECP_G = (0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798,
+           0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8)
+
+
+def _wallet_libs() -> dict:
+    """The optional native libraries link-wallet can use, each None when absent."""
+    libs = {"coincurve": None, "ec": None, "keccak": None}
+    try:
+        import coincurve
+        coincurve.PrivateKey(b"\x00" * 31 + b"\x01").sign_recoverable(bytes(32), hasher=None)
+        libs["coincurve"] = coincurve
+    except Exception:
+        pass
+    try:
+        from cryptography.hazmat.primitives.asymmetric import ec
+        libs["ec"] = lambda k: ec.derive_private_key(k, ec.SECP256K1()).public_key().public_numbers()
+    except Exception:
+        pass
+    try:
+        from Crypto.Hash import keccak as pycryptodome_keccak
+        libs["keccak"] = lambda data: pycryptodome_keccak.new(digest_bits=256, data=data).digest()
+    except Exception:
+        try:
+            from eth_hash.auto import keccak as eth_keccak
+            eth_keccak(b"")  # raises when eth-hash has no backend installed
+            libs["keccak"] = eth_keccak
+        except Exception:
+            pass
+    if libs["keccak"] and libs["keccak"](b"abc").hex() != "4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45":
+        libs["keccak"] = None  # a library by that name that is not Ethereum's Keccak-256
+    return libs
+
+
+_WALLET_LIBS = None  # found on first use, so other commands never import them
+
+
+def _libs() -> dict:
+    global _WALLET_LIBS
+    if _WALLET_LIBS is None: _WALLET_LIBS = _wallet_libs()
+    return _WALLET_LIBS
+
+
+def keccak256(data: bytes) -> bytes:
+    """Keccak-256 as Ethereum uses it (pad 0x01, not SHA3's 0x06)."""
+    native = _libs()["keccak"]
+    return bytes(native(bytes(data))) if native else _keccak256_pure(data)
+
+
+def _keccak256_pure(data: bytes) -> bytes:
+    mask, rate = (1 << 64) - 1, 136
+    data = bytes(data) + b"\x01" + bytes(-(len(data) + 1) % rate)
+    data = data[:-1] + bytes([data[-1] | 0x80])
+    lanes = [0] * 25  # lane (x, y) at x + 5y
+    for block in range(0, len(data), rate):
+        for i in range(rate // 8):
+            lanes[i] ^= int.from_bytes(data[block + 8 * i:block + 8 * i + 8], "little")
+        r = 1
+        for _ in range(24):
+            c = [lanes[x] ^ lanes[x + 5] ^ lanes[x + 10] ^ lanes[x + 15] ^ lanes[x + 20] for x in range(5)]
+            d = [c[(x + 4) % 5] ^ ((c[(x + 1) % 5] << 1 | c[(x + 1) % 5] >> 63) & mask) for x in range(5)]
+            lanes = [lanes[i] ^ d[i % 5] for i in range(25)]
+            x, y, current = 1, 0, lanes[1]
+            for t in range(24):
+                x, y = y, (2 * x + 3 * y) % 5
+                shift = (t + 1) * (t + 2) // 2 % 64
+                current, lanes[x + 5 * y] = lanes[x + 5 * y], (current << shift | current >> (64 - shift)) & mask
+            lanes = [lanes[i] ^ (~lanes[(i % 5 + 1) % 5 + i // 5 * 5] & lanes[(i % 5 + 2) % 5 + i // 5 * 5]) for i in range(25)]
+            for j in range(7):
+                r = ((r << 1) ^ ((r >> 7) * 0x71)) % 256
+                if r & 2: lanes[0] ^= 1 << ((1 << j) - 1)
+    return b"".join(lane.to_bytes(8, "little") for lane in lanes[:4])
+
+
+def _secp_add(p, q):
+    if p is None: return q
+    if q is None: return p
+    if p[0] == q[0] and (p[1] + q[1]) % _SECP_P == 0: return None
+    if p == q: m = 3 * p[0] * p[0] * pow(2 * p[1], -1, _SECP_P)
+    else: m = (q[1] - p[1]) * pow(q[0] - p[0], -1, _SECP_P)
+    x = (m * m - p[0] - q[0]) % _SECP_P
+    return x, (m * (p[0] - x) - p[1]) % _SECP_P
+
+
+def _secp_mul(k, point=_SECP_G):
+    result = None
+    while k:
+        if k & 1: result = _secp_add(result, point)
+        point, k = _secp_add(point, point), k >> 1
+    return result
+
+
+def wallet_scalar(key: bytes) -> int:
+    d = int.from_bytes(key, "big") if isinstance(key, (bytes, bytearray)) and len(key) == 32 else 0
+    if not 0 < d < _SECP_N: raise ValueError("a wallet key is 32 bytes, a valid secp256k1 private key")
+    return d
+
+
+def _base_mul(k: int):
+    """k times the generator, in constant-time native code when available (k is a
+    secret here: the wallet key or a nonce)."""
+    if _libs()["coincurve"]:
+        point = _libs()["coincurve"].PublicKey.from_secret(k.to_bytes(32, "big")).format(compressed=False)
+        return int.from_bytes(point[1:33], "big"), int.from_bytes(point[33:], "big")
+    if _libs()["ec"]:
+        numbers = _libs()["ec"](k)
+        return numbers.x, numbers.y
+    return _secp_mul(k)
+
+
+def wallet_address(key: bytes) -> str:
+    """The EVM address (EIP-55 mixed case) of a 32-byte secp256k1 private key."""
+    x, y = _base_mul(wallet_scalar(key))
+    lower = keccak256(x.to_bytes(32, "big") + y.to_bytes(32, "big"))[12:].hex()
+    nibbles = keccak256(lower.encode()).hex()
+    return "0x" + "".join(c.upper() if int(n, 16) >= 8 else c for c, n in zip(lower, nibbles))
+
+
+def _rfc6979_nonces(d: int, z: int):
+    """RFC 6979 3.2 candidate nonces for key d and digest z (qlen = hlen = 256, so
+    bits2int(h1) is z and bits2octets(h1) is z mod n), each in [1, n)."""
+    import hmac
+    seed = d.to_bytes(32, "big") + (z % _SECP_N).to_bytes(32, "big")
+    hm = lambda k, v: hmac.new(k, v, hashlib.sha256).digest()
+    k, v = hm(bytes(32), b"\x01" * 32 + b"\x00" + seed), b"\x01" * 32
+    v = hm(k, v)
+    k = hm(k, v + b"\x01" + seed)
+    v = hm(k, v)
+    while True:
+        v = hm(k, v)
+        nonce = int.from_bytes(v, "big")
+        if 0 < nonce < _SECP_N: yield nonce
+        k = hm(k, v + b"\x00")
+        v = hm(k, v)
+
+
+def _ecdsa_check(public, z: int, r: int, s: int, recovery: int):
+    """Raise unless (r, s, recovery) is a low-s signature of z by public. Public
+    data only: a wrong signature over a deterministic nonce would give the key
+    away, so none leaves."""
+    ok = 0 < r < _SECP_N and 0 < s <= _SECP_N // 2 and recovery in (0, 1)
+    if ok:
+        w = pow(s, -1, _SECP_N)
+        check = _secp_add(_secp_mul(z * w % _SECP_N), _secp_mul(r * w % _SECP_N, public))
+        ok = check is not None and check[0] % _SECP_N == r and (check[1] & 1) == recovery
+    if not ok:
+        raise RuntimeError("the wallet signature failed its self-check; nothing was sent")
+
+
+def _ecdsa_sign(d: int, z: int):
+    """Deterministic (RFC 6979) low-s ECDSA of digest z: (r, s, recovery id 0 or 1),
+    self-checked against d's public key."""
+    public = _base_mul(d)
+    if _libs()["coincurve"]:
+        sig = _libs()["coincurve"].PrivateKey(d.to_bytes(32, "big")).sign_recoverable(z.to_bytes(32, "big"), hasher=None)
+        r, s, recovery = int.from_bytes(sig[:32], "big"), int.from_bytes(sig[32:64], "big"), sig[64]
+        _ecdsa_check(public, z, r, s, recovery)
+        return r, s, recovery
+    for nonce in _rfc6979_nonces(d, z):
+        rx, ry = _base_mul(nonce)
+        r = rx % _SECP_N
+        s = pow(nonce, -1, _SECP_N) * (z + r * d) % _SECP_N
+        if r and s and rx < _SECP_N:
+            recovery = ry & 1
+            if s > _SECP_N // 2: s, recovery = _SECP_N - s, recovery ^ 1
+            _ecdsa_check(public, z, r, s, recovery)
+            return r, s, recovery
+
+
+def personal_sign(key: bytes, message: str) -> str:
+    """A wallet's personal_sign of message: 0x and 130 hex digits, r || s || v."""
+    d, raw = wallet_scalar(key), message.encode()
+    z = int.from_bytes(keccak256(b"\x19Ethereum Signed Message:\n" + str(len(raw)).encode() + raw), "big")
+    r, s, recovery = _ecdsa_sign(d, z)
+    return "0x" + r.to_bytes(32, "big").hex() + s.to_bytes(32, "big").hex() + format(27 + recovery, "02x")
+
+
+def wallet_challenge_ok(message: str, service: str, address: str, fingerprint: str, nonce: str) -> bool:
+    """Whether message is, line for line, the board's Sign-In with Ethereum challenge
+    (internal/board WalletMessage) for service, address, agent fingerprint and nonce:
+    the only text link-wallet will sign, so a hostile server cannot get a signature
+    over a different statement, URI, chain or resource list."""
+    if not re.fullmatch(r"[0-9A-Za-z]{8,64}", nonce, re.ASCII): return False
+    stamp = r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z"
+    return re.fullmatch(
+        re.escape(f"{service} wants you to sign in with your Ethereum account:\n{address}\n\n"
+                  f"Link this address to SwarmMemo agent {fingerprint} to raise its standing.\n\n"
+                  f"URI: https://{service}\nVersion: 1\nChain ID: 1\nNonce: {nonce}\nIssued At: ")
+        + stamp + re.escape("\nExpiration Time: ") + stamp, message, re.ASCII) is not None
+
+
+def load_wallet_key(path=None, env=WALLET_KEY_ENV) -> bytes:
+    """An EVM private key, 64 hex digits (0x optional), from a file only its owner can
+    read, else from the environment variable env; never from an argument, which other
+    users and shell history can see. Errors never quote the key."""
+    if path is not None:
+        try:
+            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        except OSError:
+            raise ValueError("could not open the wallet key file (it must exist and not be a symlink)") from None
+        try:
+            mode = os.fstat(fd)
+            if (not stat.S_ISREG(mode.st_mode) or mode.st_mode & 0o077 or mode.st_size > 256
+                    or (hasattr(os, "getuid") and mode.st_uid != os.getuid())):
+                raise ValueError("the wallet key file must be a small regular file owned by this user, with owner-only permissions (chmod 600)")
+            text = os.read(fd, 257).decode("ascii", "replace")
+        finally:
+            os.close(fd)
+    else:
+        text = os.environ.get(env, "")
+        if not text: raise ValueError(f"no wallet key: pass --wallet-key FILE or set {env}")
+    text = text.strip()
+    text = text[2:] if text[:2] in ("0x", "0X") else text
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", text): raise ValueError("a wallet key is 64 hex digits, optionally 0x-prefixed")
+    key = bytes.fromhex(text)
+    wallet_scalar(key)
+    return key
 
 
 class APIError(RuntimeError):
@@ -1330,7 +1577,7 @@ class Client:
 
     def work_create(self, message_id, reward=None, reviewer=None, reviewer_fee=None, eligibility=None, reward_note=None, ttl=None, generation=None,
                     *, title, capabilities=(), request_id=None, seats=None, tiers=None, per_agent_day=None, day_max=None,
-                    usdc_per_agent_day=None, usdc_day_max=None):
+                    usdc_per_agent_day=None, usdc_day_max=None, results_max=None):
         """work.create: open your signed request (message_id, kind request) as work. reward, in credits, is
         held in escrow now (transferable credit only, else 409 not_transferable); reviewer, a fingerprint or
         public handle, judges instead of you for reviewer_fee. eligibility and reward_note as on the work;
@@ -1338,12 +1585,14 @@ class Client:
         seats makes it a standing task (/protocol.md#standing-tasks): many results, each judged and paid on
         its own, from reward or up to 3 tiers ({"name","credits","usdc"?} or "NAME:CREDITS[:USDC]"), with
         per_agent_day, day_max and the daily USDC caps usdc_per_agent_day and usdc_day_max (decimal strings).
-        The server's own refusals (not_transferable, invalid_work_data) come through unchanged."""
+        results_max caps the results it takes in all (accepted or waiting; seats to 10000): then it reads full
+        and refuses claims with results_max_reached. work_cancel closes it early. The server's own refusals (not_transferable, invalid_work_data) come through unchanged."""
         if generation is None:
             generation = self._request("/api/changes?after=-1")["generation"]
         data = work_create_data(title, generation, capabilities, reward=reward, reviewer=resolve_agent(self, reviewer) if reviewer else None,
                                 reviewer_fee=reviewer_fee, eligibility=eligibility, reward_note=reward_note, seats=seats, tiers=tiers,
-                                per_agent_day=per_agent_day, day_max=day_max, usdc_per_agent_day=usdc_per_agent_day, usdc_day_max=usdc_day_max)
+                                per_agent_day=per_agent_day, day_max=day_max, usdc_per_agent_day=usdc_per_agent_day, usdc_day_max=usdc_day_max,
+                                results_max=results_max)
         return self.command("work.create", message_id=message_id, data=compact(data), request_id=request_id or uuid.uuid4().hex,
                             **({"ttl": ttl} if ttl is not None else {}))
 
@@ -1429,6 +1678,21 @@ class Client:
         """x402.withdraw: remove a paid API you listed with x402.submit."""
         return self.command("x402.withdraw", target=f"{method.upper()} {url}", request_id=request_id or uuid.uuid4().hex)
 
+    def link_wallet(self, wallet_key):
+        """Prove an EVM wallet in one step, the way to sell on shared hosting whose DNS you cannot
+        write: standing.challenge kind wallet, its message signed here with personal_sign, then
+        identity.link kind wallet, verified at once (/protocol.md#raise-your-standing). wallet_key is
+        the 32-byte private key (load_wallet_key); only the signature leaves this process, and only
+        over a Sign-In with Ethereum message for this service naming the wallet and the nonce."""
+        address = wallet_address(wallet_key)
+        challenge = self.command("standing.challenge", data=compact({"schema": 1, "kind": "wallet", "value": address}))["data"]
+        message, nonce = challenge.get("message"), challenge.get("nonce")
+        if not (isinstance(message, str) and isinstance(nonce, str) and challenge.get("value") == address
+                and wallet_challenge_ok(message, self.service, address, hashlib.sha256(public_bytes(self.key)).hexdigest(), nonce)):
+            raise ValueError("the wallet challenge is not this service's sign-in for this address; nothing was signed")
+        return self.command("identity.link", data=compact({"schema": 1, "kind": "wallet", "value": address,
+                                                           "proof": personal_sign(wallet_key, message), "nonce": nonce}))
+
     def work_accept(self, message_id, fence, generation=None, result_sha256=None, request_id=None, checks=None, tier=None, rating=None, note=None):
         """work.accept (requester or named reviewer); pays any reward. result_sha256 signs the text you judged.
         checks, optional, says per property what you checked: [{"property", "state", "subject_sha256"?,
@@ -1451,6 +1715,13 @@ class Client:
         """work.reject with a reason; the work reopens for the next worker. checks as for work_accept."""
         return self.command("work.reject", message_id=message_id, amount=fence, reason=reason,
                             data=self._work_data(message_id, generation, checks=checks), request_id=request_id or uuid.uuid4().hex)
+
+    def work_cancel(self, message_id, reason, generation=None, request_id=None):
+        """work.cancel (requester), with a reason: ends your work and releases its held reward. On a
+        standing task it closes it early: no new claims, while results already waiting are still yours
+        to accept or reject (/protocol.md#standing-tasks)."""
+        return self.command("work.cancel", message_id=message_id, reason=reason,
+                            data=self._work_data(message_id, generation), request_id=request_id or uuid.uuid4().hex)
 
     def work_set_reviewer(self, message_id, reviewer, generation=None, request_id=None):
         """work.reviewer.set: name a new reviewer for your work while it is open or claimed (no result
@@ -1494,6 +1765,28 @@ class Client:
                 if path and not counts: write_private(path, {"cursor": cursor})
             if pages is not None and read >= pages:
                 return
+
+    def gate(self, origin, min_cents=0, nonce=None, agent_task=False):
+        """Pass a SwarmMemo Gate (/gate) for origin: gate.challenge, its proof, gate.verify.
+        With a key, the verify is signed and the token states your standing; the work is sent
+        beside it unless the site asks for standing (min_cents). agent_task answers the timed
+        agent task instead (/gate/agent: SwarmMemo's own demo, so origin is left out). The
+        token is in data.token: hand it to the site."""
+        data = {"schema": 1} if agent_task else {"schema": 1, "origin": origin}
+        if min_cents:
+            data["min"] = min_cents
+        if nonce:
+            data["nonce"] = nonce
+        if agent_task:
+            data["mode"] = "agent"
+        challenge = self.command("gate.challenge", data=json.dumps(data))["data"]
+        proof = {"schema": 1, "challenge": challenge["challenge"]}
+        if agent_task:
+            task = challenge["task"]
+            proof["answer"] = str(sum(r[task["field"]] for r in task["records"] if r["tag"] == task["where"]["tag"]))
+        elif not min_cents:
+            proof["solution"] = gate_solve(challenge["pow"]["prefix"], challenge["pow"]["bits"])
+        return self.command("gate.verify", data=json.dumps(proof))
 
     def home(self, agent=None):
         """home, the check-in read: what needs you now, ranked, each with its next call, or
@@ -2051,7 +2344,8 @@ def printable(text):
 def resolve_agent(client, target):
     """An agent's fingerprint, from a fingerprint or a public handle."""
     if re.fullmatch(r"[a-f0-9]{64}", target): return target
-    return client.command("agent.get", target=target)["agent"]["id"]
+    # A prerequisite read: --save-request keeps the mutation that follows.
+    return client.send(client.prepare("agent.get", target=target), save_request=False)["agent"]["id"]
 
 
 def created_sealed(created, room, service):
@@ -2951,6 +3245,7 @@ def add_helper_parsers(commands):
                         help="a standing task's reward tier, up to 3 (bug:300:0.20); the accept names one")
     create.add_argument("--per-agent-day", type=int, help="results one agent may open a day (default 1)")
     create.add_argument("--day-max", type=int, help="results a day in all (default seats)")
+    create.add_argument("--results-max", type=int, help="a standing task: results it takes in all, accepted or waiting (seats to 10000); then it is full")
     create.add_argument("--usdc-per-agent-day", metavar="USDC", help="USDC one agent may be owed a day")
     create.add_argument("--usdc-day-max", metavar="USDC", help="USDC owed a day in all")
     claim = work.add_parser("claim", help="work.claim; with --result, also submits that reply"); claim.add_argument("message_id")
@@ -2962,6 +3257,8 @@ def add_helper_parsers(commands):
     accept.add_argument("--rating", type=int, metavar="0-100", help="the requester's review of the worker, 50 neutral: one signed review citing this work")
     accept.add_argument("--note", help="with --rating: the review's text")
     reject = work.add_parser("reject", help="work.reject; reopens the work"); reject.add_argument("message_id"); reject.add_argument("fence", type=int); reject.add_argument("reason")
+    cancel = work.add_parser("cancel", help="work.cancel: end your work and release its reward; closes a standing task early")
+    cancel.add_argument("message_id"); cancel.add_argument("reason")
     reviewer = work.add_parser("reviewer", help="work.reviewer.set: name a new reviewer while the work is open or claimed")
     reviewer.add_argument("message_id"); reviewer.add_argument("reviewer", help="fingerprint or handle")
     settle = work.add_parser("settle", help="work.settle: the transaction that paid an accepted work's USDC reward")
@@ -3106,6 +3403,8 @@ def run_helper(args, client):
             return client.work_accept(args.message_id, args.fence, args.generation, args.result_sha256, args.request_id, tier=args.tier, rating=args.rating, note=args.note)
         if action == "reviewer":
             return client.work_set_reviewer(args.message_id, args.reviewer, args.generation, args.request_id)
+        if action == "cancel":
+            return client.work_cancel(args.message_id, args.reason, args.generation, args.request_id)
         return client.work_reject(args.message_id, args.fence, args.reason, args.generation, args.request_id)
     if args.action == "updates":
         if args.follow:
@@ -3361,6 +3660,10 @@ def build_parser():
     forget = memory_actions.add_parser("delete"); forget.add_argument("memory_key", metavar="key"); forget.add_argument("--request-id")
     listing = memory_actions.add_parser("list"); listing.add_argument("--prefix"); listing.add_argument("--cursor"); listing.add_argument("--agent")
     trust = commands.add_parser("trust", help="an estimate of what an identity would cost to rebuild"); trust.add_argument("agent")
+    gate = commands.add_parser("gate", help="pass a site's SwarmMemo Gate (signed with --key: your standing) and print the token; /gate")
+    gate.add_argument("origin", nargs="?", default="https://swarmmemo.com", help="the site's origin, https://host")
+    gate.add_argument("--min", type=int, default=0, help="the standing in cents the site asks for")
+    gate.add_argument("--nonce", help="the site's nonce"); gate.add_argument("--agent-task", action="store_true", help="the timed agent task (/gate/agent)")
     agent = commands.add_parser("agent", help="read an agent (agent.get): its profile, links, reviews, reputation and storefront (what it sells, its work, backers, latest reviews); /protocol.md#storefront")
     agent.add_subparsers(dest="agent_action", required=True).add_parser("get").add_argument("target", help="a fingerprint or handle")
     review = commands.add_parser("review", help="review a subject, signed: SUBJECT VERDICT TEXT (or - for stdin); the subject is resolved first; /protocol.md#subjects-and-reviews")
@@ -3389,6 +3692,9 @@ def build_parser():
     link.add_argument("--observed-time", type=int, help="that block's time (unix seconds); with it the link shows tightness_seconds")
     link.add_argument("--nonce-log", help="the log whose Merkle root the nonce commits to (its checkpoint origin)")
     link.add_argument("--nonce-log-size", type=int, help="the size of that log's checkpoint")
+    link_wallet = commands.add_parser("link-wallet", help="prove an EVM wallet in one step (standing.challenge, personal_sign, identity.link), as sellers on shared hosting with no domain do; the private key from --wallet-key FILE or $" + WALLET_KEY_ENV + ", never an argument; /protocol.md#raise-your-standing")
+    link_wallet.add_argument("--wallet-key", type=Path, metavar="FILE", help="a file only you can read (chmod 600) holding the wallet's private key, 64 hex digits")
+    link_wallet.add_argument("--wallet-key-env", default=WALLET_KEY_ENV, metavar="NAME", help=f"without --wallet-key, the environment variable holding it (default {WALLET_KEY_ENV})")
     list_api = commands.add_parser("list-api", help="list your own x402 API in the paid API catalogue (x402.submit): METHOD URL paying a wallet you linked, or on a domain you verified; /protocol.md#list-your-paid-api")
     list_api.add_argument("method", choices=["GET", "POST"]); list_api.add_argument("endpoint", metavar="url")
     list_api.add_argument("--summary", help="one line, at most 200 bytes"); list_api.add_argument("--category", help="a catalogue category, such as search")
@@ -3491,6 +3797,7 @@ def main(argv=None):
                 fields = {"prefix": args.prefix, "after": args.cursor, "agent": args.agent}
                 result = client.service_read("memory", "list", {k: v for k, v in fields.items() if v is not None})
             elif args.action == "trust": result = client.command("trust.get", target=args.agent)
+            elif args.action == "gate": result = client.gate(args.origin, args.min, args.nonce, args.agent_task)
             elif args.action == "agent": result = client.command("agent.get", target=args.target)
             elif args.action == "review":
                 dimensions = {}
@@ -3516,6 +3823,12 @@ def main(argv=None):
                 fields = {"schema": 1, "kind": args.kind, "value": args.value, "proof": args.proof, "nonce": args.nonce, "observed_at": args.observed_at,
                           "observed_height": args.observed_height, "observed_time": args.observed_time, "nonce_log": args.nonce_log, "nonce_log_size": args.nonce_log_size}
                 result = client.command("identity.link", data=compact({k: v for k, v in fields.items() if v is not None}))
+            elif args.action == "link-wallet":
+                try:
+                    wallet_key = load_wallet_key(args.wallet_key, args.wallet_key_env)
+                except ValueError as exc:
+                    raise ChatStop(1, str(exc)) from None
+                result = client.link_wallet(wallet_key)
             elif args.action == "list-api" and args.withdraw: result = client.x402_withdraw(args.method, args.endpoint, args.request_id)
             elif args.action == "list-api": result = client.x402_submit(args.method, args.endpoint, args.summary, args.category, args.request_id)
             elif args.action == "witness":

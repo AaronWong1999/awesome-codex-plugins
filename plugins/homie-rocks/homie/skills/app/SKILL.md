@@ -6,6 +6,9 @@ compatibility: Node 22 and Chrome; the studio's pinned toolkit and Wrangler.
 
 # Make an app
 
+For place-based builds, read [the six-build patterns](../app/PLACES.md): owner words to needs, records as objects, a local scene and ambience, one trusted operation for screens and AI, graceful graphics, and adversarial proof. Apply the same authority and honest-evidence rules to game economies and tickets.
+
+
 For the installed version’s payment, records and local-check contracts, start with
 `node_modules/@homie-rocks/studio/apps/APPS.md`. Its “Real Stripe test checkout on
 this computer” section is the supported offline-hosting path: real Stripe test
@@ -354,3 +357,11 @@ and pass a role when deliberately testing the customer experience.
 `check --shots` may capture outside the studio, but persistent needs evidence copies
 those pictures into `.studio/checks` and stores studio-relative paths. Keep that
 folder with the Codex evidence. Deploy can render it without outside-path warnings.
+
+### Places: capacity, TV space and failed graphics
+
+Authoritative bookings/inventory are server-side `defineTool` actions with strict schemas and atomic versioned writes, never a client-writable generic ledger. Use [the capacity example](examples/reserve.mjs): seed one place through an owner action; six simultaneous reservation requests must yield exactly one winner. Derive identity from the caller; expose neither inventory totals nor the authoritative namespace as client mutations.
+
+Initialise text controls and navigation before 3D rendering. Catch renderer creation failures inside the scene section; keep fallback text in normal flow, never over navigation. Add a navigation need and run `homie-studio check <id> --webgl-failure --shots .checks/no-webgl` to prove the controls work without WebGL.
+
+On TV, reserve `--homie-join-inset-bottom/right` (or the configured corner's top/left) plus a gap; `body.homie-join-visible` and `--homie-join-x/y/width/height` describe the shell card in the app frame too. See `node_modules/@homie-rocks/studio/docs/toolkit-place-patterns.md` for layout and text-first examples, connector setup and diagnostics.

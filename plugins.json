@@ -3,7 +3,7 @@
   "name": "awesome-codex-plugins",
   "version": "1.0.0",
   "last_updated": "2026-10-15",
-  "total": 297,
+  "total": 299,
   "categories": [
     "Development & Workflow",
     "Tools & Integrations"
@@ -2680,6 +2680,16 @@
       "install_url": "https://raw.githubusercontent.com/AddisonHoff/sendsets/HEAD/.codex-plugin/plugin.json"
     },
     {
+      "name": "Serply",
+      "url": "https://github.com/serply-inc/skills",
+      "owner": "serply-inc",
+      "repo": "skills",
+      "description": "Live Google web, news, Scholar, and Maps results plus page scraping in Codex through the hosted Serply MCP server, with the API key read from an environment variable.",
+      "category": "Tools & Integrations",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/serply-inc/skills/HEAD/.codex-plugin/plugin.json"
+    },
+    {
       "name": "Shots",
       "url": "https://github.com/hitSlop/shots",
       "owner": "hitSlop",
@@ -2698,6 +2708,16 @@
       "category": "Tools & Integrations",
       "source": "awesome-codex-plugins",
       "install_url": "https://raw.githubusercontent.com/phnx-labs/svatlas-mcp/HEAD/.codex-plugin/plugin.json"
+    },
+    {
+      "name": "SolidPing",
+      "url": "https://github.com/fclairamb/solidping-plugin",
+      "owner": "fclairamb",
+      "repo": "solidping-plugin",
+      "description": "Uptime monitoring from Codex through the hosted SolidPing MCP server with OAuth sign-in: read checks, results and incidents, diagnose failures, and manage checks and status pages after you confirm.",
+      "category": "Tools & Integrations",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/fclairamb/solidping-plugin/HEAD/.codex-plugin/plugin.json"
     },
     {
       "name": "SolidWorks GPT Plugin",
