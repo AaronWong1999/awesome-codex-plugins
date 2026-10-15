@@ -3,7 +3,7 @@
   "name": "awesome-codex-plugins",
   "version": "1.0.0",
   "last_updated": "2026-10-15",
-  "total": 299,
+  "total": 300,
   "categories": [
     "Development & Workflow",
     "Tools & Integrations"
@@ -2648,6 +2648,16 @@
       "category": "Tools & Integrations",
       "source": "awesome-codex-plugins",
       "install_url": "https://raw.githubusercontent.com/Majny/sectionsight/HEAD/.codex-plugin/plugin.json"
+    },
+    {
+      "name": "Self-Starter",
+      "url": "https://github.com/hyprh/self-starter",
+      "owner": "hyprh",
+      "repo": "self-starter",
+      "description": "Define custom events in plain language, check them with lightweight probes, and resume your Codex conversation when they fire.",
+      "category": "Tools & Integrations",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/hyprh/self-starter/HEAD/plugin/.codex-plugin/plugin.json"
     },
     {
       "name": "SEO Dungeon",
