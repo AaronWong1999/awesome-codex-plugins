@@ -168,8 +168,7 @@ def normalize_repo_url(raw: str) -> str:
     Strips trailing slashes, .git suffix, and extra path segments.
     """
     s = raw.strip().rstrip("/")
-    if s.endswith(".git"):
-        s = s[:-4]
+    s = re.sub(r"\.git$", "", s, flags=re.IGNORECASE)
     # If it's a full URL, extract owner/repo
     match = re.match(r"https?://github\.com/([^/]+/[^/]+)", s, re.IGNORECASE)
     if match:
