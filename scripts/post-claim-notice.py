@@ -223,26 +223,35 @@ def parse_pr_diff_for_repos():
         text = repo_url_re.sub(lambda m: " repo/" + normalize_repo_url(m.group(1)), text)
         return re.sub(r"[^a-z0-9]+", "", text.lower())
 
+    current_file = None
     for line in diff.split("\n"):
-        is_added = line.startswith("+") and not line.startswith("+++")
-        is_removed = line.startswith("-") and not line.startswith("---")
+        if line.startswith("+++ "):
+            path = line[4:].strip()
+            current_file = path[2:] if path.startswith("b/") else path
+            continue
+        if line.startswith("--- "):
+            continue
+        is_added = line.startswith("+")
+        is_removed = line.startswith("-")
         if not is_added and not is_removed:
             continue
         body = normalize_body(line[1:])
         repos = {normalize_repo_url(m) for m in repo_url_re.findall(line)}
         # Skip hashgraph-online repos (our own)
         repos = {repo for repo in repos if not repo.startswith("hashgraph-online/")}
+        # Netting is scoped per file: a removal in a vendored or unrelated
+        # file must not suppress a genuine catalog README addition.
         if is_removed:
             for repo in repos:
-                removed_line_repos.setdefault(repo, set()).add(body)
+                removed_line_repos.setdefault((repo, current_file), set()).add(body)
             continue
         for repo in repos:
-            added_line_repos.setdefault(repo, set()).add(body)
+            added_line_repos.setdefault((repo, current_file), set()).add(body)
 
     return {
         repo
-        for repo, bodies in added_line_repos.items()
-        if bodies - removed_line_repos.get(repo, set())
+        for (repo, filename), bodies in added_line_repos.items()
+        if bodies - removed_line_repos.get((repo, filename), set())
     }
 
 
