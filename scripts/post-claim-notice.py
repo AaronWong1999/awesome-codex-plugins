@@ -205,13 +205,15 @@ def parse_pr_diff_for_repos():
     diff = result.stdout
 
     added_line_repos = {}
-    removed_bodies = set()
+    removed_line_repos = {}
     # Match https://github.com/owner/repo on diff lines. A re-sorted README
     # line appears on both a `-` and a `+` side with the same content, so it
     # must not count as the PR adding that repository. Bodies are compared
     # case- and punctuation-insensitively so a moved line that is re-indented
     # or re-punctuated still nets, while a real addition survives an unrelated
-    # removal of the same URL.
+    # removal of the same URL. Netting is keyed per repository: the removed
+    # line must mention the same repo, so distinct repos whose listing text
+    # differs only in punctuation (acme/foo-bar vs acme/foobar) never alias.
     def normalize_body(text):
         return re.sub(r"[^a-z0-9]+", "", text.lower())
 
@@ -221,22 +223,25 @@ def parse_pr_diff_for_repos():
         if not is_added and not is_removed:
             continue
         body = normalize_body(line[1:])
+        repos = {
+            normalize_repo_url(match)
+            for match in re.findall(
+                r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)", line
+            )
+        }
+        # Skip hashgraph-online repos (our own)
+        repos = {repo for repo in repos if not repo.startswith("hashgraph-online/")}
         if is_removed:
-            removed_bodies.add(body)
+            for repo in repos:
+                removed_line_repos.setdefault(repo, set()).add(body)
             continue
-        matches = re.findall(r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)", line)
-        for match in matches:
-            normalized = normalize_repo_url(match)
-            # Skip hashgraph-online repos (our own)
-            if normalized.startswith("hashgraph-online/"):
-                continue
-            added_line_repos.setdefault(body, set()).add(normalized)
+        for repo in repos:
+            added_line_repos.setdefault(repo, set()).add(body)
 
     return {
         repo
-        for body, repos in added_line_repos.items()
-        if body not in removed_bodies
-        for repo in repos
+        for repo, bodies in added_line_repos.items()
+        if bodies - removed_line_repos.get(repo, set())
     }
 
 
