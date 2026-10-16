@@ -214,7 +214,14 @@ def parse_pr_diff_for_repos():
     # removal of the same URL. Netting is keyed per repository: the removed
     # line must mention the same repo, so distinct repos whose listing text
     # differs only in punctuation (acme/foo-bar vs acme/foobar) never alias.
+    repo_url_re = re.compile(
+        r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)", re.IGNORECASE
+    )
+
     def normalize_body(text):
+        # Canonicalize repo URLs inside the body so .git suffixes, trailing
+        # slashes, and host casing do not defeat the move comparison.
+        text = repo_url_re.sub(lambda m: " repo/" + normalize_repo_url(m.group(1)), text)
         return re.sub(r"[^a-z0-9]+", "", text.lower())
 
     for line in diff.split("\n"):
@@ -223,12 +230,7 @@ def parse_pr_diff_for_repos():
         if not is_added and not is_removed:
             continue
         body = normalize_body(line[1:])
-        repos = {
-            normalize_repo_url(match)
-            for match in re.findall(
-                r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)", line
-            )
-        }
+        repos = {normalize_repo_url(m) for m in repo_url_re.findall(line)}
         # Skip hashgraph-online repos (our own)
         repos = {repo for repo in repos if not repo.startswith("hashgraph-online/")}
         if is_removed:
