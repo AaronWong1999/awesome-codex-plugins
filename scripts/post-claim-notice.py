@@ -204,19 +204,25 @@ def parse_pr_diff_for_repos():
     )
     diff = result.stdout
 
-    repos = set()
-    # Match https://github.com/owner/repo in added lines (starting with +)
+    added_repos = set()
+    removed_repos = set()
+    # Match https://github.com/owner/repo on diff lines. A re-sorted README
+    # line appears on both a `-` and a `+` line and must not count as the PR
+    # adding that repository.
     for line in diff.split("\n"):
-        if not line.startswith("+"):
+        is_added = line.startswith("+") and not line.startswith("+++")
+        is_removed = line.startswith("-") and not line.startswith("---")
+        if not is_added and not is_removed:
             continue
         matches = re.findall(r"https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)", line)
         for match in matches:
             normalized = normalize_repo_url(match)
             # Skip hashgraph-online repos (our own)
-            if not normalized.startswith("hashgraph-online/"):
-                repos.add(normalized)
+            if normalized.startswith("hashgraph-online/"):
+                continue
+            (added_repos if is_added else removed_repos).add(normalized)
 
-    return repos
+    return added_repos - removed_repos
 
 
 def has_existing_claim_comment():
