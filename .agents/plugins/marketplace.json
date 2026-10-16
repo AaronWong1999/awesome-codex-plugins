@@ -3544,6 +3544,20 @@
       "description": "Decentralized e-commerce skills — deploy self-hosted stores, import products from Shopify/Amazon, configure custom domains and Telegram bots, set up Tor privacy, and manage your store via MCP."
     },
     {
+      "name": "moltnode",
+      "displayName": "MoltNode by Chord",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tuantqse90/moltnode-mcp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Read 31 blockchains over JSON-RPC and get best-route DEX swap quotes with unsigned transactions via Chord, through two hosted no-key MCP servers and three skills."
+    },
+    {
       "name": "morning-ai",
       "displayName": "MorningAI",
       "source": {
