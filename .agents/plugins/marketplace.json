@@ -16,7 +16,8 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Development & Workflow",
-      "description": "Universal multi-agent infrastructure with 25 specialist agents, 16 enforced workflow skills, and a lead orchestrator for Claude Code, Codex CLI, Cursor, and OpenCode."
+      "description": "Universal multi-agent infrastructure with 25 specialist agents, 16 enforced workflow skills, and a lead orchestrator for Claude Code, Codex CLI, Cursor, and OpenCode.",
+      "icon": "./plugins/RBraga01/a-team/assets/ATeam_full.png"
     },
     {
       "name": "aegis",
@@ -2949,6 +2950,21 @@
       "category": "Tools & Integrations",
       "description": "Search U.S. federal and state court filing rules, judge standing orders, local rules and court holidays through the hosted Court Rules MCP server, with a skill that cites the court's own document.",
       "icon": "./plugins/foklepoint/court-rules-codex-plugin/assets/icon.svg"
+    },
+    {
+      "name": "damnpdfs",
+      "displayName": "DamnPDFs",
+      "source": {
+        "source": "local",
+        "path": "./plugins/SouravBeraAkaSpeed/damnpdfs-codex-plugin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Use 71 PDF, image and Office file tools through a paired DamnPDFs browser tab, with temporary cloud processing for native conversions and local imports.",
+      "icon": "./plugins/SouravBeraAkaSpeed/damnpdfs-codex-plugin/assets/icon.png"
     },
     {
       "name": "darkmoon",

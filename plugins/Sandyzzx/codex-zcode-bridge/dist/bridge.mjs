@@ -23565,7 +23565,11 @@ var WINDOWS_OS_ENV = /* @__PURE__ */ new Set([
   "PROGRAMDATA",
   "OS",
   "PROCESSOR_ARCHITECTURE",
-  "NUMBER_OF_PROCESSORS"
+  "NUMBER_OF_PROCESSORS",
+  // Non-sensitive system install directories; browser auto-discovery resolves
+  // system Chrome/Edge under these roots (src/browser/executable.ts).
+  "PROGRAMFILES",
+  "PROGRAMFILES(X86)"
 ]);
 var POSIX_OS_ENV = /* @__PURE__ */ new Set([
   "PATH",
@@ -23600,6 +23604,10 @@ function createWorkerEnv(source) {
     "ZCODE_BRIDGE_DEFAULT_REASONING_LEVEL",
     "ZCODE_BRIDGE_MODE",
     "ZCODE_BRIDGE_TIMEOUT_MS",
+    // Env-only browser configuration (ADR-007): non-secret strings the worker's
+    // adapter reads from its own environment when no persisted setting exists.
+    "ZCODE_BRIDGE_BROWSER_USE",
+    "ZCODE_BRIDGE_BROWSER_EXECUTABLE",
     "ZCODE_HOME",
     "ZCODE_BUILTIN_PROVIDER_CONFIG_FILE",
     "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE",
@@ -26369,7 +26377,7 @@ function formatDuration(durationMs2) {
 
 // src/mcp/server.ts
 var SERVER_NAME = "codex-zcode-bridge";
-var SERVER_VERSION = "1.2.5"; // x-release-please-version
+var SERVER_VERSION = "1.2.6"; // x-release-please-version
 var EXECUTION_NOT_VERDICT = "Results describe Bridge/ZCode execution only: status 'completed' means the invocation and report normalization finished, NOT that the calling host accepted the work. the calling host must independently review the workspace diff and checks before deciding PASS.";
 function okResult2(data) {
   return {
