@@ -3116,6 +3116,21 @@
       "icon": "./plugins/GarethManning/education-agent-skills/assets/education-agent-skills-icon.svg"
     },
     {
+      "name": "eigenheim-market",
+      "displayName": "Eigenheim Berlin Market Data",
+      "source": {
+        "source": "local",
+        "path": "./plugins/magicSEO/eigenheim-mcp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Read-only remote MCP server and skill for daily Berlin real estate data: price per m² by locality, rental yields, land values and active listings.",
+      "icon": "./plugins/magicSEO/eigenheim-mcp/assets/app-icon.png"
+    },
+    {
       "name": "equibles",
       "displayName": "Equibles",
       "source": {

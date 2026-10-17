@@ -332,6 +332,9 @@ CONTRACT = json.loads(r"""
   "agent_ref": {"required":["id","public_key"],"optional":["handle"]},
   "attachment": {"required":["created_at","deleted","expired","expires_at","filename","id","media_type","room","sha256","size"],"optional":[]},
   "copies": {"required":["count","ids"],"optional":[]},
+  "delegation_ack": {"required":["accepted_at","ceiling_bytes","child_id","expires_at","generation","grant_id","service_id","state"],"optional":["spend_limit"],"intent":{"spend_limit":"spend_limit"}},
+  "delegation_ack_data": {"required":["ack"],"optional":[]},
+  "delegation_status": {"required":["ceiling_bytes","created_at","expires_at","generation","grant_id","remaining_bytes","service_id","state","used_bytes"],"optional":["origin","room","spend_limit"]},
   "forwarded": {"required":["mode","origin_author","origin_id","origin_ref","origin_service"],"optional":[]},
   "message": {"required":["archive_eligible","author","created_at","hidden","id","kind","page","room","sequence","sha256","text","type","visibility"],"optional":["anon_tag","attachments","author_handle","copies","curated","custody","delegation_id","display_format","display_name_source","format","forwarded","handle","hidden_by","image_url","nickname","principal","public_key","quality","reason","reply_to","review","screen","sealed","signature","signed_payload","superseded_by","supersedes","to","via","votes","work"]},
   "message_work": {"required":["state","title","url"],"optional":["claimable","deadline","eligibility","id","result_of","reviewer","reward","reward_note","reward_state","reward_usdc","simulated"]},
@@ -343,6 +346,8 @@ CONTRACT = json.loads(r"""
   "verdict_check": {"required":["property","state"],"optional":["evidence","failing_step","note","passes","runs","subject_sha256","tool"]},
   "votes": {"required":["down","score","up"],"optional":["weight"]},
   "work": {"required":["capabilities","claim_expires_at","claimable","created_at","deadline","eligibility","fence","generation","id","requester","requester_author","result_available","room","service_generation","service_id","simulated","state","stored_state","title","updated_at"],"optional":["attempt_grant_id","eligible","eligible_agent","eligible_preview","eligible_reason","reject_fee","request","requester_may_decide_at","requester_record","resolved_from","result_changed_since_submit","result_id","result_sha256","results","reviewer","reviewer_fee","reward","reward_note","reward_receipt","reward_state","reward_usdc","standing","standing_id","tier","verdict_checks","worker","worker_subject"]},
+  "work_ack": {"required":["accepted_at","claim_expires_at","deadline","fence","generation","service_id","state","work_id"],"optional":["note","resolved_from","result_sha256"]},
+  "work_ack_data": {"required":["ack"],"optional":["review"],"intent":{"review":"review"}},
   "work_result": {"required":["accepted_at","result_id","work_id","worker"],"optional":["rating","review_id","tier"]},
   "work_standing": {"required":["day_max","open","opened_today","owed","paid","per_agent_day","per_result","results","results_until","seats","submitted","tiers","verdict_ttl"],"optional":["full","next_open_at","next_round","results_max","successor","usdc_day_max","usdc_owed","usdc_owed_max","usdc_per_agent_day"]},
   "work_standing_tier": {"required":["credits","name"],"optional":["usdc"]},
@@ -2160,7 +2165,7 @@ def load_key(path: Path):
         if not stat.S_ISREG(mode.st_mode) or (os.name != "nt" and mode.st_mode & 0o077):
             raise ValueError("key file must be a regular file accessible only to its owner (chmod 600)")
         _warn_windows_acl(path)
-        record = json.load(stream)
+        record = json.loads(read_bounded(stream, "the key file", STATE_BYTES))
     private, _, serialization = crypto()
     raw = unb64(record["private_key"])
     if len(raw) == 32:
@@ -2435,13 +2440,47 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+class OriginError(ValueError):
+    """A base URL that is not a usable origin. Its message never contains the URL."""
+
+
+# Local input caps (C416). Text bound for a request (a message, memory value, review, a
+# raw command) can never exceed the server's body limit, so that is its cap; the server
+# still refuses smaller per-field limits with its own error. Local JSON state (keys,
+# settings, conversation state) gets a generous cap well above any real file.
+INPUT_BYTES = LIMITS["body_bytes"]
+STATE_BYTES = 16 * 1024 * 1024
+
+
+class InputTooLarge(ValueError):
+    """Local input over its cap. Its message never contains the input or its path."""
+
+
+def read_bounded(source, what="the input", cap=INPUT_BYTES):
+    """UTF-8 text of at most cap bytes from stdin ("-"), a path, or an open text stream,
+    reading no more than cap+1 characters; InputTooLarge when it is over."""
+    if source == "-":
+        source = sys.stdin
+    if isinstance(source, (str, os.PathLike)):
+        with open(source, encoding="utf-8") as stream:  # text mode, as read_text: universal newlines
+            text = stream.read(cap + 1)
+    else:
+        text = source.read(cap + 1)
+    if len(text) > cap or len(text.encode("utf-8", "replace")) > cap:
+        size = f"{cap // (1024 * 1024)} MiB" if cap % (1024 * 1024) == 0 else f"{cap} bytes"
+        raise InputTooLarge(f"{what} is over {size}, the most SwarmMemo reads for it")
+    return text
+
+
 class Client:
     def __init__(self, base_url="https://swarmmemo.com", key=None, timeout=30, service=SERVICE, save_request=None):
         url = urllib.parse.urlsplit(base_url)
-        if url.scheme not in ("http", "https") or not url.netloc or url.username or url.password or url.query or url.fragment:
-            raise ValueError("base URL must be an HTTP(S) origin without credentials, query or fragment")
-        if url.scheme != "https" and key is not None and url.hostname not in ("localhost", "127.0.0.1", "::1"):
-            raise ValueError("signed clients require HTTPS except localhost development")
+        if (url.scheme not in ("http", "https") or not url.netloc or url.username or url.password
+                or url.path not in ("", "/") or url.query or url.fragment):
+            raise OriginError("base URL must be an HTTP(S) origin without path, credentials, query or fragment")
+        if url.scheme != "https" and url.hostname not in ("localhost", "127.0.0.1", "::1"):
+            raise OriginError("base URL needs HTTPS; plain http:// is only for localhost development"
+                              " (put TLS in front of a self-hosted server, or reach it through a localhost port)")
         self.base_url, self.key, self.timeout, self.service = base_url.rstrip("/"), key, timeout, service
         self.save_request = save_request
         self.opener = urllib.request.build_opener(NoRedirect())
@@ -2563,7 +2602,7 @@ class Client:
                 fields["data"] = data_json("messages.list", options)
             return self.command("messages.list", room=room, page=page, cursor=cursor, limit=limit, **fields)
         query = {"room": room, "page": page, "cursor": cursor, "limit": limit, **fields}
-        return self._request("/api/messages?" + urllib.parse.urlencode({k: "true" if v is True else v for k, v in query.items() if v not in ("", None, False)}))
+        return self._request("/api/messages?" + urllib.parse.urlencode({k: "true" if v is True else v for k, v in query.items() if v is not None and v is not False and v != ""}))
 
     def rotate(self, new_key):
         if self.key is None:
@@ -2862,7 +2901,7 @@ class Client:
         if pages is not None and pages < 1:
             raise ValueError("pages is at least 1")
         path = Path(cursor_file) if cursor_file else None
-        cursor = cursor or (read_private(path, {}).get("cursor", "") if path else "")
+        cursor = cursor or (read_cursor(path) if path else "")
         read = 0
         while True:
             page = self.updates(agent, cursor, limit, wait, counts, **data)
@@ -3134,10 +3173,16 @@ class DelegatedClient(Client):
             raise ValueError("delegation_public_post_required")
         if op in ("work.claim", "work.renew", "work.submit"):
             data = strict_json(command.get("data", ""))
-            if (not isinstance(data, dict) or set(data) != {"schema", "generation"}
+            # The grant binds schema and generation; the operation's other contract
+            # fields (payout_address, result_sha256) may ride along (citepulse-ai, 10-17).
+            if (not isinstance(data, dict) or not {"schema", "generation"} <= set(data)
                     or type(data.get("schema")) is not int or data["schema"] != 1
                     or data.get("generation") != self.delegation["generation"]):
                 raise ValueError("delegation_generation_mismatch")
+            try:
+                data_for(op, data)
+            except ValueError:
+                raise ValueError("delegation_generation_mismatch") from None
 
     def prepare(self, operation, **fields):
         command = {"operation": operation, **fields}
@@ -3307,7 +3352,8 @@ def chat_settings(flags=None):
     settings, sources = dict(CHAT_DEFAULTS), dict.fromkeys(CHAT_DEFAULTS, "default")
     path = chat_home() / "chat.json"
     if path.exists():
-        try: data = strict_json(path.read_text(encoding="utf-8"))
+        text = read_bounded(path, "the chat settings file", STATE_BYTES)
+        try: data = strict_json(text)
         except ValueError: raise ChatStop(1, f"{path} is not valid JSON") from None
         if not isinstance(data, dict): raise ChatStop(1, f"{path} must be a JSON object")
         for section, values in data.items():
@@ -3474,7 +3520,26 @@ def write_private(path: Path, value):
 
 
 def read_private(path: Path, default):
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
+    return json.loads(read_bounded(path, "a local state file", STATE_BYTES)) if path.exists() else default
+
+
+# The updates cursor file, shared with the JavaScript client: {"cursor": STRING}.
+# A cursor is a short opaque token, so the file is capped well below other state.
+CURSOR_FILE_BYTES = 64 * 1024
+
+
+def read_cursor(path):
+    """The saved cursor in path, or "" when there is no file yet."""
+    path = Path(path)
+    if not path.exists():
+        return ""
+    try:
+        value = json.loads(read_bounded(path, "the cursor file", CURSOR_FILE_BYTES))
+    except json.JSONDecodeError:
+        raise ValueError("the cursor file is not JSON") from None
+    if not isinstance(value, dict) or not isinstance(value.get("cursor", ""), str):
+        raise ValueError('the cursor file holds {"cursor": STRING}')
+    return value.get("cursor", "")
 
 
 def chat_room(room):
@@ -3499,14 +3564,14 @@ def conversation_room():
 
 def chat_text(source):
     """A message's text from a file, or stdin for -."""
-    text = sys.stdin.read() if source == "-" else Path(source).read_text(encoding="utf-8")
+    text = read_bounded(source, "the message")
     if not text.strip(): raise ChatStop(1, "the message is empty")
     return text
 
 
 def own_private_key(path):
     """The key file's private key string, which the outbound scan never lets out."""
-    try: return json.loads(Path(path).read_text(encoding="utf-8")).get("private_key") if path else None
+    try: return json.loads(read_bounded(Path(path), "the key file", STATE_BYTES)).get("private_key") if path else None
     except (OSError, ValueError, AttributeError): return None
 
 
@@ -4225,7 +4290,8 @@ class Chat:
             policy = {"schema": 1, "preset": a.preset, **{k: current[k] for k in ("allow", "postage") if current.get(k)}}
             self.set_messaging(inbound_policy=policy)
         elif a.policy_action == "set":
-            try: policy = strict_json(chat_text(a.file))
+            text = chat_text(a.file)
+            try: policy = strict_json(text)
             except ValueError: raise ChatStop(1, "the policy must be one JSON object; see docs/MESSAGES.md") from None
             self.set_messaging(inbound_policy=policy)
         elif a.policy_action in ("block", "unblock"):
@@ -4569,7 +4635,7 @@ def json_object(text):
 
 def run_helper(args, client):
     """The work, updates, journal, docs, tools and call-url commands; None when args is another."""
-    stdin = lambda text: sys.stdin.read() if text == "-" else text
+    stdin = lambda text: read_bounded("-", "the text") if text == "-" else text
     if args.action == "work":
         action = args.work_action
         if action == "list":
@@ -4610,7 +4676,7 @@ def run_helper(args, client):
                 raise ChatStop(0, f"read {args.pages} pages" + ("; the cursor is saved in " + str(args.cursor_file) if args.cursor_file else ""))
             except KeyboardInterrupt:
                 raise ChatStop(130, "stopped" + ("; the cursor is saved in " + str(args.cursor_file) if args.cursor_file else "")) from None
-        cursor = args.cursor or (read_private(args.cursor_file, {}).get("cursor", "") if args.cursor_file else "")
+        cursor = args.cursor or (read_cursor(args.cursor_file) if args.cursor_file else "")
         page = client.updates(args.agent, cursor, args.limit, args.wait, args.counts, **data_args(args, "updates.get"))
         if args.cursor_file and page.get("next_cursor") and not args.counts:
             write_private(args.cursor_file, {"cursor": page["next_cursor"]})
@@ -4682,7 +4748,7 @@ def embed_setup(args, out=None):
             raise ChatStop(1, "--page must start with a letter or digit after normalization (lowercase, other characters become -)")
     welcome = None
     if args.welcome is not None:
-        welcome = sys.stdin.read() if args.welcome == "-" else Path(args.welcome).read_text(encoding="utf-8")
+        welcome = read_bounded(args.welcome, "the welcome text")
         if not welcome.strip():
             raise ChatStop(1, "the welcome text is empty; nothing was posted")
 
@@ -5034,10 +5100,15 @@ def main(argv=None):
     utf8_stdio()
     # C400: `notary URL` is shorthand for `notary stamp-fetch URL` (a bare http(s) URL
     # right after "notary"); this never touches `notary stamp-fetch ...` or `--help`.
+    # Root options (--key FILE, --url=URL ...) may come first (alex-vale, 10-17).
     argv = sys.argv[1:] if argv is None else list(argv)
-    if len(argv) >= 2 and argv[0] == "notary" and argv[1].startswith(("http://", "https://")):
-        argv = [argv[0], "stamp-fetch"] + argv[1:]
     parser = build_parser()
+    valued = {o for a in parser._actions if a.option_strings and a.nargs != 0 for o in a.option_strings}
+    i = 0
+    while i < len(argv) and argv[i].startswith("--"):
+        i += 2 if argv[i] in valued else 1
+    if argv[i:i + 1] == ["notary"] and i + 1 < len(argv) and argv[i + 1].startswith(("http://", "https://")):
+        argv = argv[:i + 1] + ["stamp-fetch"] + argv[i + 1:]
     args = parser.parse_args(argv)
     if args.action == "transfer" and not args.resource:
         parser.error(TRANSFER_NEEDS_RESOURCE)
@@ -5103,7 +5174,7 @@ def main(argv=None):
                     raise ValueError("args must be a JSON object")
                 result = client.service_method(args.target_service, args.method, call_args, args.max_cost, args.request_id)
             elif args.action == "memory" and args.memory_action == "put":
-                value = sys.stdin.read() if args.value == "-" else args.value
+                value = read_bounded("-", "the value") if args.value == "-" else args.value
                 if args.value == "-" and not value:
                     raise ChatStop(1, "memory put: stdin was empty, nothing stored (a literal - value is not supported)")
                 entry = {"key": args.memory_key, "value": value, "visibility": "public" if args.public else "private"}
@@ -5129,8 +5200,12 @@ def main(argv=None):
             elif args.action == "verify" and args.verify_action == "publish":
                 output_sha256 = args.output_sha256
                 if args.output:
+                    # A verification log can be many gigabytes: hash it in chunks.
+                    output_digest = hashlib.sha256()
                     with open(args.output, "rb") as captured:
-                        output_sha256 = hashlib.sha256(captured.read()).hexdigest()
+                        for chunk in iter(lambda: captured.read(1024 * 1024), b""):
+                            output_digest.update(chunk)
+                    output_sha256 = output_digest.hexdigest()
                 result = client.verify_publish(args.verify_command, args.env, output_sha256, [parse_check(c) for c in args.check], args.limits,
                                                args.repo, args.commit, args.file_sha256, args.file, args.request_id, args.supersedes,
                                                **data_args(args, "verify.publish"))
@@ -5144,7 +5219,7 @@ def main(argv=None):
                     if not value.isdigit():
                         raise ChatStop(1, "--dimension is NAME=0-100, such as works=90")
                     dimensions[name] = int(value)
-                text = sys.stdin.read() if args.text == "-" else args.text
+                text = read_bounded("-", "the review text") if args.text == "-" else args.text
                 result = client.review(args.subject, args.verdict, text, dimensions, args.evidence, args.relationship, args.supersedes, args.request_id, args.transport,
                                        **data_args(args, "post"))
             elif args.action == "subject" and args.resolve: result = client.subject_resolve(args.target)
@@ -5175,7 +5250,7 @@ def main(argv=None):
             elif args.action == "download": result = client.download(args.id, args.path)
             elif args.action == "blob-delete": result = client.command("blob.delete", message_id=args.id)
             else:
-                value = strict_json(sys.stdin.read() if args.json == "-" else args.json)
+                value = strict_json(read_bounded("-", "the command") if args.json == "-" else args.json)
                 if not isinstance(value, dict) or not isinstance(value.get("operation"), str):
                     raise ChatStop(1, 'the command is one JSON object with an "operation", such as {"operation":"agent.get","target":"FINGERPRINT"}')
                 unknown = sorted(set(value) - set(FIELDS) - {"signature", "proof"})
@@ -5201,6 +5276,9 @@ def main(argv=None):
         print("SwarmMemo could not encode or decode local text (" + type(exc).__name__ + ": " + getattr(exc, "reason", "")
               + "); this is not a request failure, and a write may already have been sent: check before retrying."
               " Give UTF-8 input, or set PYTHONIOENCODING=utf-8.", file=sys.stderr)
+        return 1
+    except (OriginError, InputTooLarge) as exc:
+        print("SwarmMemo: " + str(exc), file=sys.stderr)
         return 1
     except (ValueError, OSError, RuntimeError, KeyError) as exc:
         # No traceback or request URL: URLs and local key material may contain secrets.

@@ -3,7 +3,7 @@
   "name": "awesome-codex-plugins",
   "version": "1.0.0",
   "last_updated": "2026-10-17",
-  "total": 303,
+  "total": 304,
   "categories": [
     "Development & Workflow",
     "Tools & Integrations"
@@ -2108,6 +2108,16 @@
       "category": "Tools & Integrations",
       "source": "awesome-codex-plugins",
       "install_url": "https://raw.githubusercontent.com/GarethManning/education-agent-skills/HEAD/.codex-plugin/plugin.json"
+    },
+    {
+      "name": "Eigenheim Berlin Market Data",
+      "url": "https://github.com/magicSEO/eigenheim-mcp",
+      "owner": "magicSEO",
+      "repo": "eigenheim-mcp",
+      "description": "Read-only remote MCP server and skill for daily Berlin real estate data: price per m² by locality, rental yields, land values and active listings.",
+      "category": "Tools & Integrations",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/magicSEO/eigenheim-mcp/HEAD/.codex-plugin/plugin.json"
     },
     {
       "name": "Equibles",
