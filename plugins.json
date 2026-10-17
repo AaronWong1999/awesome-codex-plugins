@@ -3,7 +3,7 @@
   "name": "awesome-codex-plugins",
   "version": "1.0.0",
   "last_updated": "2026-10-17",
-  "total": 302,
+  "total": 303,
   "categories": [
     "Development & Workflow",
     "Tools & Integrations"
@@ -228,6 +228,16 @@
       "category": "Development & Workflow",
       "source": "awesome-codex-plugins",
       "install_url": "https://raw.githubusercontent.com/cloudguo123/atomlane/HEAD/.codex-plugin/plugin.json"
+    },
+    {
+      "name": "Auto Pilot",
+      "url": "https://github.com/minsu0707/auto-pilot",
+      "owner": "minsu0707",
+      "repo": "auto-pilot",
+      "description": "Intake-first Codex plugin that turns a short project request into a structured, resumable execution workflow with one-question-at-a-time intake, project contract files, blocker triage, and resume support.",
+      "category": "Development & Workflow",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/minsu0707/auto-pilot/HEAD/.codex-plugin/plugin.json"
     },
     {
       "name": "BABOK Analyst",
