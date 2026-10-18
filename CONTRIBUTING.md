@@ -85,7 +85,7 @@ python3 -m pip download --only-binary=:all: --no-deps --dest .hol-plugin-scanner
 python3 -m pip hash .hol-plugin-scanner-dist/*.whl
 ```
 
-The catalog-owned centralized scan must complete with a normalized score of **80/100** or higher. Finding severities are advisory to listing eligibility. A local or source-CI score is useful for debugging but is not a merge prerequisite.
+You need a score of **80/130** or higher with **no critical or high severity findings**. Save the output to include in your PR description.
 
 ### Step 3: Verify your plugin repo has the required files
 
