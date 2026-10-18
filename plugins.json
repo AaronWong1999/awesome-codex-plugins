@@ -274,7 +274,7 @@
       "url": "https://github.com/unitedideas/bringyour-mcp",
       "owner": "unitedideas",
       "repo": "bringyour-mcp",
-      "description": "Read-only Codex plugin for auditing Claude Code to Codex migrations before Codex edits code. Checks AGENTS.md/CLAUDE.md scope, hooks, MCP config, skills, secret references, and validation notes.",
+      "description": "Read-only audit of AGENTS.md/CLAUDE.md scope, hooks, MCP config, skills, secret references, and validation notes before Codex edits migrated projects.",
       "category": "Development & Workflow",
       "source": "awesome-codex-plugins",
       "install_url": "https://raw.githubusercontent.com/unitedideas/bringyour-mcp/HEAD/.codex-plugin/plugin.json"

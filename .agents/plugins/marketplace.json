@@ -403,7 +403,7 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Development & Workflow",
-      "description": "Read-only Codex plugin for auditing Claude Code to Codex migrations before Codex edits code. Checks AGENTS.md/CLAUDE.md scope, hooks, MCP config, skills, secret references, and validation notes.",
+      "description": "Read-only audit of AGENTS.md/CLAUDE.md scope, hooks, MCP config, skills, secret references, and validation notes before Codex edits migrated projects.",
       "icon": "./plugins/unitedideas/bringyour-mcp/assets/bringyour.svg"
     },
     {
