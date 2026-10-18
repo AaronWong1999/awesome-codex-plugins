@@ -3,7 +3,7 @@
   "name": "awesome-codex-plugins",
   "version": "1.0.0",
   "last_updated": "2026-10-18",
-  "total": 308,
+  "total": 309,
   "categories": [
     "Development & Workflow",
     "Tools & Integrations"
@@ -1968,6 +1968,16 @@
       "category": "Tools & Integrations",
       "source": "awesome-codex-plugins",
       "install_url": "https://raw.githubusercontent.com/cohesivity-org/cohesivity-plugin/HEAD/packages/codex/plugins/cohesivity/.codex-plugin/plugin.json"
+    },
+    {
+      "name": "CometChat",
+      "url": "https://github.com/cometchat/cometchat-skills",
+      "owner": "cometchat",
+      "repo": "cometchat-skills",
+      "description": "Add real-time chat, voice and video calling to React, Angular, React Native, iOS, Android and Flutter apps, with the CometChat Docs MCP for current docs.",
+      "category": "Tools & Integrations",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/cometchat/cometchat-skills/HEAD/.codex-plugin/plugin.json"
     },
     {
       "name": "Command Code Usage",

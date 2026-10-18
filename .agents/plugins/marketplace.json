@@ -2907,6 +2907,21 @@
       "icon": "./plugins/cohesivity-org/cohesivity-plugin/assets/icon.svg"
     },
     {
+      "name": "cometchat-skills",
+      "displayName": "CometChat",
+      "source": {
+        "source": "local",
+        "path": "./plugins/cometchat/cometchat-skills"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Add real-time chat, voice and video calling to React, Angular, React Native, iOS, Android and Flutter apps, with the CometChat Docs MCP for current docs.",
+      "icon": "./plugins/cometchat/cometchat-skills/assets/composer-icon.png"
+    },
+    {
       "name": "commandcode-usage",
       "displayName": "Command Code Usage",
       "source": {
