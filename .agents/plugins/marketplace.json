@@ -16,7 +16,8 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Development & Workflow",
-      "description": "Universal multi-agent infrastructure with 25 specialist agents, 16 enforced workflow skills, and a lead orchestrator for Claude Code, Codex CLI, Cursor, and OpenCode."
+      "description": "Universal multi-agent infrastructure with 25 specialist agents, 16 enforced workflow skills, and a lead orchestrator for Claude Code, Codex CLI, Cursor, and OpenCode.",
+      "icon": "./plugins/RBraga01/a-team/assets/ATeam_full.png"
     },
     {
       "name": "aegis",
@@ -332,6 +333,21 @@
       "icon": "./plugins/cloudguo123/atomlane/assets/growth/listing-logo.svg"
     },
     {
+      "name": "auto-pilot",
+      "displayName": "Auto Pilot",
+      "source": {
+        "source": "local",
+        "path": "./plugins/minsu0707/auto-pilot"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Development & Workflow",
+      "description": "Intake-first Codex plugin that turns a short project request into a structured, resumable execution workflow with one-question-at-a-time intake, project contract files, blocker triage, and resume support.",
+      "icon": "./plugins/minsu0707/auto-pilot/assets/auto-pilot.png"
+    },
+    {
       "name": "babok_analyst",
       "displayName": "BABOK Analyst",
       "source": {
@@ -387,7 +403,7 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Development & Workflow",
-      "description": "Read-only Codex plugin for auditing Claude Code to Codex migrations before Codex edits code. Checks AGENTS.md/CLAUDE.md scope, hooks, MCP config, skills, secret references, and validation notes.",
+      "description": "Read-only audit of AGENTS.md/CLAUDE.md scope, hooks, MCP config, skills, secret references, and validation notes before Codex edits migrated projects.",
       "icon": "./plugins/unitedideas/bringyour-mcp/assets/bringyour.svg"
     },
     {
@@ -2037,7 +2053,7 @@
       "icon": "./plugins/frumu-ai/tandem-codex-plugin/assets/icon.png"
     },
     {
-      "name": "quality",
+      "name": "design",
       "displayName": "Tartiner Labs",
       "source": {
         "source": "local",
@@ -2610,6 +2626,21 @@
       "icon": "./plugins/LinespottingOrg/GrokBuildRemote-Agents/.codex-plugin/icon.svg"
     },
     {
+      "name": "bulktranscripts",
+      "displayName": "BulkTranscripts: YouTube Transcripts",
+      "source": {
+        "source": "local",
+        "path": "./plugins/pratie/bulktranscripts-mcp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Remote MCP server and skill for YouTube transcripts of one video, a whole channel or a playlist, plus YouTube search and new-upload tracking.",
+      "icon": "./plugins/pratie/bulktranscripts-mcp/assets/icon.png"
+    },
+    {
       "name": "burpsuite-mcp-bridge",
       "displayName": "BurpSuite MCP Bridge",
       "source": {
@@ -2711,6 +2742,21 @@
       },
       "category": "Tools & Integrations",
       "description": "Emit mathematics as copy- and search-safe inline Unicode (∑, ≤, ℝ, x², matrices, set-builder) instead of LaTeX so equations stay legible in the Codex TUI, terminals, and Claude Code."
+    },
+    {
+      "name": "clera",
+      "displayName": "Clera",
+      "source": {
+        "source": "local",
+        "path": "./plugins/getclera/mcp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Search 210,000+ vetted startup candidates, review Clera's picks for your open roles, and request intros through Clera's hosted MCP.",
+      "icon": "./plugins/getclera/mcp/assets/logo.svg"
     },
     {
       "name": "be-serious",
@@ -2951,6 +2997,21 @@
       "icon": "./plugins/foklepoint/court-rules-codex-plugin/assets/icon.svg"
     },
     {
+      "name": "damnpdfs",
+      "displayName": "DamnPDFs",
+      "source": {
+        "source": "local",
+        "path": "./plugins/SouravBeraAkaSpeed/damnpdfs-codex-plugin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Use 71 PDF, image and Office file tools through a paired DamnPDFs browser tab, with temporary cloud processing for native conversions and local imports.",
+      "icon": "./plugins/SouravBeraAkaSpeed/damnpdfs-codex-plugin/assets/icon.png"
+    },
+    {
       "name": "darkmoon",
       "displayName": "Darkmoon",
       "source": {
@@ -3083,6 +3144,21 @@
       "category": "Tools & Integrations",
       "description": "131 evidence-based education skills for curriculum design, lesson planning, and assessment, with transparent evidence ratings and MCP server.",
       "icon": "./plugins/GarethManning/education-agent-skills/assets/education-agent-skills-icon.svg"
+    },
+    {
+      "name": "eigenheim-market",
+      "displayName": "Eigenheim Berlin Market Data",
+      "source": {
+        "source": "local",
+        "path": "./plugins/magicSEO/eigenheim-mcp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Read-only remote MCP server and skill for daily Berlin real estate data: price per m² by locality, rental yields, land values and active listings.",
+      "icon": "./plugins/magicSEO/eigenheim-mcp/assets/app-icon.png"
     },
     {
       "name": "equibles",
@@ -3335,6 +3411,36 @@
       "icon": "./plugins/kreuzberg-dev/plugins/plugins/crawlberg/assets/icon.svg"
     },
     {
+      "name": "krexa",
+      "displayName": "Krexa",
+      "source": {
+        "source": "local",
+        "path": "./plugins/Krexa-xyz/skills"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Turn a trading idea, post or video into fixed rules, backtest and paper-trade them for free, and request a live trading agent on Binance, Coinbase, Kraken, OKX, Bybit, MEXC, Hyperliquid, Polymarket or Solana DEXs that you approve and sign, through Krexa's hosted MCP server.",
+      "icon": "./plugins/Krexa-xyz/skills/assets/icon.png"
+    },
+    {
+      "name": "kuudo-skills",
+      "displayName": "Kuudo Skills",
+      "source": {
+        "source": "local",
+        "path": "./plugins/KuudoAI/skills"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Agent Skills for Amazon sellers and advertisers — Ads audits, search-term mining, budget pacing, DSP and AMC, listings, images, repricing, FBA inbound, and profitability, through Kuudo's Amazon Ads and SP-API MCP servers.",
+      "icon": "./plugins/KuudoAI/skills/assets/kuudo-skills-icon.png"
+    },
+    {
       "name": "lacuna-music",
       "displayName": "Lacuna Music",
       "source": {
@@ -3542,6 +3648,20 @@
       },
       "category": "Tools & Integrations",
       "description": "Decentralized e-commerce skills — deploy self-hosted stores, import products from Shopify/Amazon, configure custom domains and Telegram bots, set up Tor privacy, and manage your store via MCP."
+    },
+    {
+      "name": "moltnode",
+      "displayName": "MoltNode by Chord",
+      "source": {
+        "source": "local",
+        "path": "./plugins/tuantqse90/moltnode-mcp"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Read 31 blockchains over JSON-RPC and get best-route DEX swap quotes with unsigned transactions via Chord, through two hosted no-key MCP servers and three skills."
     },
     {
       "name": "morning-ai",
@@ -3910,6 +4030,21 @@
       "icon": "./plugins/Majny/sectionsight/assets/icon.svg"
     },
     {
+      "name": "self-starter",
+      "displayName": "Self-Starter",
+      "source": {
+        "source": "local",
+        "path": "./plugins/hyprh/self-starter"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Define custom events in plain language, check them with lightweight probes, and resume your Codex conversation when they fire.",
+      "icon": "./plugins/hyprh/self-starter/assets/icon.svg"
+    },
+    {
       "name": "legends-seo-dungeon",
       "displayName": "SEO Dungeon",
       "source": {
@@ -3954,6 +4089,21 @@
       "icon": "./plugins/AddisonHoff/sendsets/assets/logo.png"
     },
     {
+      "name": "serply",
+      "displayName": "Serply",
+      "source": {
+        "source": "local",
+        "path": "./plugins/serply-inc/skills"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Live Google web, news, Scholar, and Maps results plus page scraping in Codex through the hosted Serply MCP server, with the API key read from an environment variable.",
+      "icon": "./plugins/serply-inc/skills/assets/icon.png"
+    },
+    {
       "name": "shots",
       "displayName": "Shots",
       "source": {
@@ -3982,6 +4132,21 @@
       "category": "Tools & Integrations",
       "description": "Search sourced profiles of AI startups, founders and funding, rank the companies most likely to buy a product from its website, and keep outreach lists through a hosted MCP server with OAuth sign-in.",
       "icon": "./plugins/phnx-labs/svatlas-mcp/assets/logo.png"
+    },
+    {
+      "name": "solidping",
+      "displayName": "SolidPing",
+      "source": {
+        "source": "local",
+        "path": "./plugins/fclairamb/solidping-plugin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Uptime monitoring from Codex through the hosted SolidPing MCP server with OAuth sign-in: read checks, results and incidents, diagnose failures, and manage checks and status pages after you confirm.",
+      "icon": "./plugins/fclairamb/solidping-plugin/assets/icon.svg"
     },
     {
       "name": "solidworks-gpt-plugin",

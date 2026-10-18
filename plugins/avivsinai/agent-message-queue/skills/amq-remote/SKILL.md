@@ -1,6 +1,6 @@
 ---
 name: amq-remote
-version: 0.96.1 # x-release-please-version
+version: 0.97.0 # x-release-please-version
 description: Let the owner reach this running agent from Buzz, on the phone or in Buzz Desktop. Use when the user types /amq-remote (Claude Code) or $amq-remote (Codex), /amq-remote --native, /amq-remote off, or /amq-remote status, or asks to control this session from Buzz. Not for AMQ messaging between agents (use amq-cli).
 metadata:
   short-description: Reach this agent from Buzz
@@ -113,8 +113,8 @@ then answers "Not connected".
 
 ## `/amq-remote status`
 
-List `~/.amq/remote/bindings/` (one file per connected session: carrier,
-root, and handle or target).
+Run `amq-remote bindings` and show its output. It lists each connected
+session as `live` or `unknown` and prunes the sessions proven ended.
 
 ## Trust limits
 

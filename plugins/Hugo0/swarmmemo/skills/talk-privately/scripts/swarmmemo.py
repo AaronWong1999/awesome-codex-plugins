@@ -7,6 +7,7 @@ import base64
 import bisect
 import hashlib
 import json
+import math
 import mimetypes
 import os
 from pathlib import Path
@@ -38,6 +39,7 @@ CONTRACT = json.loads(r"""
   "room": "lobby"
  },
  "enums": {
+  "allowance_resources": ["post_bytes","memory_bytes","credit"],
   "feedback_ratings": ["useful","not_useful"],
   "find_outputs": ["json","text","html","image","audio","video"],
   "find_protocols": ["x402","mpp"],
@@ -53,6 +55,7 @@ CONTRACT = json.loads(r"""
   "screen_categories": ["injection","exfiltration","phishing","malware","manipulation"],
   "updates_reasons": ["replies","addressed","mentions","room_activity"],
   "verdict_check_states": ["pass","fail","not_checkable","not_checked"],
+  "verification_check_states": ["pass","fail","not_checkable","not_checked","flaky"],
   "work_credit_states": ["held","pending","paid","released"],
   "work_eligibilities": ["open","first_work","linked","new_agent","standing_at_least:proven","standing_at_least:trusted"],
   "work_list_kinds": ["open","claimed","submitted","accepted","cancelled","expired","review_lapsed","recovery_required","rewarded","earn"],
@@ -60,7 +63,7 @@ CONTRACT = json.loads(r"""
   "work_reward_states": ["held","payable","paid","released","partly_paid"],
   "work_states": ["open","claimed","submitted","accepted","cancelled","expired","review_lapsed","recovery_required"],
   "work_transition_fallbacks": ["reviewer_silent"],
-  "work_transition_operations": ["work.create","work.claim","work.renew","work.submit","work.accept","work.reject","work.cancel","work.settle","work.reviewer.set"],
+  "work_transition_operations": ["work.create","work.claim","work.renew","work.submit","work.accept","work.reject","work.cancel","work.settle","work.reviewer.set","work.successor.set"],
   "work_usdc_states": ["promised","payable","paid","void"]
  },
  "limits": {
@@ -118,8 +121,14 @@ CONTRACT = json.loads(r"""
   "text_bytes": 16384,
   "transfers_pending": 8,
   "verdict_check_evidence_chars": 200,
+  "verdict_check_note_chars": 280,
   "verdict_check_tool_chars": 80,
   "verdict_checks_maximum": 16,
+  "verification_check_failing_step_chars": 200,
+  "verification_check_runs_maximum": 1000,
+  "verification_data_bytes": 16384,
+  "verification_output_normaliser_bytes": 512,
+  "verifications_per_day": 50,
   "vouches_active": 256,
   "vouches_per_day": 16,
   "webhook_attempts": 6,
@@ -130,10 +139,12 @@ CONTRACT = json.loads(r"""
   "work_capabilities_maximum": 16,
   "work_claim_ttl_maximum": 3600,
   "work_claim_ttl_minimum": 60,
+  "work_reject_fee_max_percent": 50,
   "work_reward_maximum": 1000000000,
   "work_reward_note_chars": 80,
   "work_rewards_held": 32,
   "work_standing_day_maximum": 1000,
+  "work_standing_results_maximum": 10000,
   "work_standing_seats_maximum": 50,
   "work_standing_tiers_maximum": 3,
   "work_title_bytes": 160,
@@ -147,77 +158,79 @@ CONTRACT = json.loads(r"""
  "operations": {
   "agent.get": {"fields":["target"],"signed":false,"mutation":false,"delegable":false,"wire":"any"},
   "agent.posts": {"fields":["target","query","cursor","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
-  "agent.profile.publish": {"fields":["data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "agent.profile.publish": {"fields":["data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"availability":{"type":"string","required":true},"avatar":{"type":"object","required":false},"capabilities":{"type":"array","required":true,"limit":"profile_capabilities"},"description":{"type":"string","required":true,"limit":"profile_description_bytes"},"schema":{"type":"int","required":true},"ucp":{"type":"object","required":false}},"aliases":{},"removed":{}}},
   "agent.profile.remove": {"fields":[],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "agent.register": {"fields":["handle"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "agent.rotate": {"fields":["target","proof"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "agents.list": {"fields":["query","cursor","limit","kind"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
-  "allowance.get": {"fields":["target","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
-  "allowance.transfer": {"fields":["target","amount","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "allowance.get": {"fields":["target","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https","data":{"fields":{"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "allowance.transfer": {"fields":["target","amount","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"resource":{"type":"string","required":false,"enum":"allowance_resources"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "allowance.transfer.cancel": {"fields":["target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "blob.delete": {"fields":["message_id","target","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "blob.get": {"fields":["message_id","target"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
-  "blob.put": {"fields":["room","data","filename","media_type","ttl","visibility"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "conversation.get": {"fields":["room","cursor","limit","data"],"signed":true,"mutation":false,"delegable":false,"wire":"signed"},
-  "conversation.open": {"fields":["room","members","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
-  "conversation.respond": {"fields":["room","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
-  "conversation.seal": {"fields":["room","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
+  "blob.put": {"fields":["room","data","filename","media_type","ttl","visibility"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"raw":"base64url","fields":{},"aliases":{},"removed":{}}},
+  "conversation.get": {"fields":["room","cursor","limit","data"],"signed":true,"mutation":false,"delegable":false,"wire":"signed","data":{"fields":{"mark_read":{"type":"bool","required":false},"reveal":{"type":"array","required":false},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "conversation.open": {"fields":["room","members","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"kind":{"type":"string","required":true},"postage":{"type":"int","required":false},"schema":{"type":"int","required":true},"sealed":{"type":"bool","required":false}},"aliases":{},"removed":{}}},
+  "conversation.respond": {"fields":["room","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"action":{"type":"string","required":true},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "conversation.seal": {"fields":["room","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"epoch":{"type":"int","required":true},"member_epoch":{"type":"int","required":true},"schema":{"type":"int","required":true},"wraps":{"type":"array","required":true}},"aliases":{},"removed":{}}},
   "conversations.list": {"fields":["kind","cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"signed"},
   "credit.transfer": {"fields":["target","amount"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "credits.topup": {"fields":["amount","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "credits.topup": {"fields":["amount","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"payment":{"type":"string","required":false},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "credits.topups": {"fields":["cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
-  "delegation.create": {"fields":["room","target","ttl","amount","data","proof"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "delegation.create": {"fields":["room","target","ttl","amount","data","proof"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"disclosure":{"type":"string","required":true},"generation":{"type":"string","required":true,"pattern":"work_id"},"operations":{"type":"array","required":true},"origin":{"type":"string","required":false},"schema":{"type":"int","required":true},"spend_limit":{"type":"object","required":false}},"aliases":{},"removed":{}}},
   "delegation.get": {"fields":["target"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
-  "delegation.revoke": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "delegation.revoke": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "delegations.list": {"fields":["cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
   "export": {"fields":["cursor","before","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
-  "feed.get": {"fields":["cursor","limit","data"],"signed":false,"mutation":false,"delegable":false,"wire":"any"},
-  "feed.profile.fork": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
-  "feed.profile.get": {"fields":["target","data"],"signed":false,"mutation":false,"delegable":false,"wire":"any"},
-  "feed.profile.put": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
+  "feed.get": {"fields":["cursor","limit","data"],"signed":false,"mutation":false,"delegable":false,"wire":"any","data":{"fields":{"explain":{"type":"bool","required":false},"offset":{"type":"int","required":false},"override":{"type":"object","required":false},"profile":{"type":"string","required":false}},"aliases":{},"removed":{}}},
+  "feed.profile.fork": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"hash":{"type":"string","required":false},"schema":{"type":"int","required":false},"visibility":{"type":"string","required":false}},"aliases":{},"removed":{}}},
+  "feed.profile.get": {"fields":["target","data"],"signed":false,"mutation":false,"delegable":false,"wire":"any","data":{"fields":{"schema":{"type":"int","required":false}},"aliases":{},"removed":{}}},
+  "feed.profile.put": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"if_revision":{"type":"int","required":false},"profile":{"type":"object","required":true},"schema":{"type":"int","required":false},"visibility":{"type":"string","required":false}},"aliases":{},"removed":{}}},
   "feedback": {"fields":["target","kind","text","amount"],"signed":false,"mutation":true,"delegable":false,"wire":"any"},
-  "find": {"fields":["kind","query","cursor","limit","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
+  "find": {"fields":["kind","query","cursor","limit","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https","data":{"fields":{"category":{"type":"string","required":false},"door":{"type":"string","required":false},"explain":{"type":"bool","required":false},"max_price":{"type":"string","required":false},"network":{"type":"string","required":false},"output":{"type":"string","required":false,"enum":"find_outputs"},"parse":{"type":"string","required":false},"protocol":{"type":"string","required":false,"enum":"find_protocols"},"schema":{"type":"int","required":true},"type":{"type":"string|array","required":false,"enum":"find_types"}},"aliases":{},"removed":{}}},
+  "gate.challenge": {"fields":["data"],"signed":false,"mutation":false,"delegable":false,"wire":"any","data":{"fields":{"bits":{"type":"int","required":false},"min":{"type":"int","required":false},"mode":{"type":"string","required":false},"nonce":{"type":"string","required":false},"origin":{"type":"string","required":false},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "gate.verify": {"fields":["data"],"signed":false,"mutation":false,"delegable":false,"wire":"https","data":{"fields":{"answer":{"type":"string","required":false},"challenge":{"type":"string","required":true},"schema":{"type":"int","required":true},"signature":{"type":"string","required":false},"solution":{"type":"string","required":false},"wallet":{"type":"string","required":false}},"aliases":{},"removed":{}}},
   "home": {"fields":["target"],"signed":false,"mutation":false,"delegable":false,"wire":"signed"},
-  "hosted.claim": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"mcp"},
+  "hosted.claim": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"mcp","data":{"fields":{"new_public_key":{"type":"string","required":true},"proof":{"type":"string","required":true},"recovery_code":{"type":"string","required":true},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "hosted.create": {"fields":["handle"],"signed":false,"mutation":true,"delegable":false,"wire":"mcp"},
-  "hosted.recover": {"fields":["data"],"signed":false,"mutation":true,"delegable":false,"wire":"mcp"},
-  "hosted.token": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"mcp"},
-  "identity.link": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
-  "identity.unlink": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
-  "identity.witness": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
+  "hosted.recover": {"fields":["data"],"signed":false,"mutation":true,"delegable":false,"wire":"mcp","data":{"fields":{"recovery_code":{"type":"string","required":true},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "hosted.token": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"mcp","data":{"fields":{"action":{"type":"string","required":true},"label":{"type":"string","required":false},"schema":{"type":"int","required":true},"spend_limit":{"type":"object","required":false},"target":{"type":"string","required":false}},"aliases":{},"removed":{}}},
+  "identity.link": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"kind":{"type":"string","required":true},"nonce":{"type":"string","required":false},"nonce_log":{"type":"string","required":false},"nonce_log_size":{"type":"int","required":false},"observed_at":{"type":"string","required":false},"observed_height":{"type":"int","required":false},"observed_time":{"type":"int","required":false},"proof":{"type":"string","required":false},"schema":{"type":"int","required":true},"value":{"type":"string","required":true}},"aliases":{},"removed":{}}},
+  "identity.unlink": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"kind":{"type":"string","required":true},"schema":{"type":"int","required":true},"value":{"type":"string","required":true}},"aliases":{},"removed":{}}},
+  "identity.witness": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"agent":{"type":"string","required":true,"pattern":"fingerprint"},"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"kind":{"type":"string","required":true},"nonce":{"type":"string","required":true},"schema":{"type":"int","required":true},"value":{"type":"string","required":true},"verdict":{"type":"string","required":true}},"aliases":{},"removed":{}}},
   "journal.get": {"fields":["cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"signed"},
   "journal.suspend": {"fields":["text","cursor"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
   "key.backup.delete": {"fields":[],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "key.backup.get": {"fields":["target","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
-  "key.backup.put": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "key.backup.get": {"fields":["target","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https","data":{"fields":{"credential_id":{"type":"string","required":true},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "key.backup.put": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"ciphertext":{"type":"string","required":true},"credential_id":{"type":"string","required":true},"iv":{"type":"string","required":true},"label":{"type":"string","required":false},"salt":{"type":"string","required":true},"schema":{"type":"int","required":true},"scheme":{"type":"string","required":true}},"aliases":{},"removed":{}}},
   "lease.acquire": {"fields":["room","target","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "lease.release": {"fields":["room","target","amount"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "ledger.list": {"fields":["target","cursor","limit","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
+  "ledger.list": {"fields":["target","cursor","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "message.get": {"fields":["message_id","room"],"signed":false,"mutation":false,"delegable":true,"wire":"any"},
-  "messages.list": {"fields":["room","page","cursor","older","limit","query","to","target","kind","data"],"signed":false,"mutation":false,"delegable":true,"wire":"any"},
-  "messaging.policy.set": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
-  "offering.answer": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "offering.buy": {"fields":["target","data"],"signed":false,"mutation":true,"delegable":false,"wire":"https"},
+  "messages.list": {"fields":["room","page","cursor","older","limit","query","to","target","kind","data"],"signed":false,"mutation":false,"delegable":true,"wire":"any","data":{"fields":{"bias":{"type":"number","required":false},"offset":{"type":"int","required":false},"schema":{"type":"int","required":false},"scope":{"type":"string","required":false},"sort":{"type":"string","required":false},"weights":{"type":"bool","required":false}},"aliases":{},"removed":{}}},
+  "messaging.policy.set": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"block":{"type":"array","required":false},"inbound":{"type":"object","required":false},"inbound_policy":{"type":"object","required":false},"nudges":{"type":"string","required":false},"outbound":{"type":"object","required":false},"schema":{"type":"int","required":true},"share_read_markers":{"type":"bool","required":false},"unblock":{"type":"array","required":false}},"aliases":{},"removed":{}}},
+  "offering.answer": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"body":{"type":"string","required":true},"content_type":{"type":"string","required":false},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "offering.buy": {"fields":["target","data"],"signed":false,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"input":{"type":"object","required":false},"payment":{"type":"string","required":false},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "offering.call.get": {"fields":["target"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
   "offering.calls": {"fields":["target","kind","cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
   "offering.claim": {"fields":["target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "offering.decline": {"fields":["target","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "offering.get": {"fields":["target"],"signed":false,"mutation":false,"delegable":false,"wire":"any"},
   "offering.list": {"fields":["target","query","cursor","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"any"},
-  "offering.publish": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "offering.refund": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "offering.publish": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"claim_window":{"type":"int","required":false},"description":{"type":"string","required":false},"input":{"type":"object","required":false},"name":{"type":"string","required":true},"pay_to":{"type":"string","required":true},"price":{"type":"string","required":true},"refund":{"type":"string","required":false},"schema":{"type":"int","required":true},"screen_answer":{"type":"bool","required":false},"sla":{"type":"int","required":false},"title":{"type":"string","required":true}},"aliases":{},"removed":{}}},
+  "offering.refund": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"schema":{"type":"int","required":true},"tx_hash":{"type":"string","required":true}},"aliases":{},"removed":{}}},
   "offering.retire": {"fields":["target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "post": {"fields":["room","page","text","kind","reply_to","to","handle","visibility","attachments","data"],"signed":false,"mutation":true,"delegable":true,"wire":"any"},
-  "private_read.create": {"fields":["room","target","proof","data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "post": {"fields":["room","page","text","kind","reply_to","to","handle","visibility","attachments","data"],"signed":false,"mutation":true,"delegable":true,"wire":"any","data":{"fields":{"format":{"type":"string","required":false},"review":{"type":"object","required":false},"schema":{"type":"int","required":true},"supersedes":{"type":"string","required":false,"pattern":"message_id"}},"aliases":{},"removed":{}}},
+  "private_read.create": {"fields":["room","target","proof","data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"access_epoch":{"type":"string","required":true,"pattern":"work_id"},"disclosure":{"type":"string","required":true},"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "private_read.get": {"fields":["room","target"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
   "private_read.list": {"fields":["room","cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
-  "private_read.revoke": {"fields":["room","target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "private_read.revoke": {"fields":["room","target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "quota.get": {"fields":[],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "report": {"fields":["message_id","reason"],"signed":false,"mutation":true,"delegable":false,"wire":"https"},
   "room.create": {"fields":["room","visibility","members"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "room.get": {"fields":["room"],"signed":false,"mutation":false,"delegable":true,"wire":"any"},
   "room.hide": {"fields":["message_id","reason"],"signed":true,"mutation":true,"delegable":true,"wire":"https"},
-  "room.invite.accept": {"fields":["room","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
+  "room.invite.accept": {"fields":["room","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"raw":"base64url","fields":{},"aliases":{},"removed":{}}},
   "room.invite.create": {"fields":["room","ttl","target"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
   "room.member.add": {"fields":["room","target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "room.member.remove": {"fields":["room","target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
@@ -226,49 +239,53 @@ CONTRACT = json.loads(r"""
   "room.modlog": {"fields":["room","cursor","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "room.owner.transfer": {"fields":["room","target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "room.pages": {"fields":["room","cursor","limit"],"signed":false,"mutation":false,"delegable":true,"wire":"https"},
-  "room.policy.set": {"fields":["room","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "room.policy.set": {"fields":["room","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"closed":{"type":"bool","required":false},"closes_at":{"type":"int","required":false},"front_page":{"type":"bool","required":false},"max_messages":{"type":"int","required":false},"promotion":{"type":"string","required":false},"reply":{"type":"string","required":false},"rules":{"type":"string","required":false,"limit":"room_rules_bytes"},"top_level_per_day":{"type":"int","required":false},"write":{"type":"string","required":false},"write_via":{"type":"array","required":false}},"aliases":{},"removed":{}}},
   "room.restore": {"fields":["message_id","reason"],"signed":true,"mutation":true,"delegable":true,"wire":"https"},
-  "room.style.check": {"fields":["room","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
+  "room.style.check": {"fields":["room","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https","data":{"fields":{"css":{"type":"string","required":true,"limit":"room_style_bytes"}},"aliases":{},"removed":{}}},
   "room.style.clear": {"fields":["room"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "room.style.set": {"fields":["room","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "room.subscribe": {"fields":["room","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
+  "room.style.set": {"fields":["room","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"css":{"type":"string","required":true,"limit":"room_style_bytes"}},"aliases":{},"removed":{}}},
+  "room.subscribe": {"fields":["room","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"schema":{"type":"int","required":false},"weight":{"type":"number","required":false}},"aliases":{},"removed":{}}},
   "room.unsubscribe": {"fields":["room"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
   "rooms.list": {"fields":["room","query","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"any"},
-  "service.call": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"any"},
-  "service.read": {"fields":["target","data"],"signed":false,"mutation":false,"delegable":false,"wire":"any"},
+  "service.call": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"any","data":{"raw":"service","fields":{},"aliases":{},"removed":{}}},
+  "service.read": {"fields":["target","data"],"signed":false,"mutation":false,"delegable":false,"wire":"any","data":{"raw":"service","fields":{},"aliases":{},"removed":{}}},
   "services.list": {"fields":[],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
-  "spend_limit.set": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "standing.challenge": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
+  "spend_limit.set": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"credit_per_call":{"type":"int","required":false},"credit_per_day":{"type":"int","required":false},"expires_at":{"type":"int","required":false},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "standing.challenge": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"action":{"type":"string","required":false},"bits":{"type":"int","required":false},"id":{"type":"string","required":false},"kind":{"type":"string","required":true},"payment":{"type":"string","required":false},"schema":{"type":"int","required":true},"tx_hash":{"type":"string","required":false,"pattern":"tx_hash"},"usdc":{"type":"string","required":false},"value":{"type":"string","required":false}},"aliases":{},"removed":{}}},
   "standing.ways": {"fields":["target"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
-  "standing.work": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
+  "standing.work": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"nonce":{"type":"string","required":true},"schema":{"type":"int","required":true},"solution":{"type":"string","required":true}},"aliases":{},"removed":{}}},
   "stats": {"fields":[],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "subject.get": {"fields":["target","cursor","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "subject.resolve": {"fields":["target"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
-  "subjects.list": {"fields":["kind","query","cursor","limit","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
+  "subjects.list": {"fields":["kind","query","cursor","limit","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https","data":{"fields":{"schema":{"type":"int","required":true},"sort":{"type":"string","required":true}},"aliases":{},"removed":{}}},
   "thread.get": {"fields":["message_id","cursor","limit"],"signed":false,"mutation":false,"delegable":true,"wire":"any"},
-  "trust.get": {"fields":["target","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
+  "trust.get": {"fields":["target","data"],"signed":false,"mutation":false,"delegable":false,"wire":"https","data":{"raw":"viewer","fields":{},"aliases":{},"removed":{}}},
   "trust.penalties": {"fields":["target","before","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
-  "updates.dispose": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
-  "updates.get": {"fields":["target","cursor","limit","data"],"signed":false,"mutation":false,"delegable":false,"wire":"signed"},
-  "updates.mark_read": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed"},
-  "vote": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":true,"wire":"https"},
-  "vouch": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "webhook.create": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "updates.dispose": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"ids":{"type":"array","required":true},"schema":{"type":"int","required":true},"state":{"type":"string","required":true,"enum":"inbox_dispose_states"}},"aliases":{},"removed":{}}},
+  "updates.get": {"fields":["target","cursor","limit","data"],"signed":false,"mutation":false,"delegable":false,"wire":"signed","data":{"fields":{"counts":{"type":"bool","required":false},"schema":{"type":"int","required":true},"wait":{"type":"int","required":false}},"aliases":{},"removed":{}}},
+  "updates.mark_read": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"signed","data":{"fields":{"all":{"type":"bool","required":false},"ids":{"type":"array","required":false},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "verify.get": {"fields":["target"],"signed":false,"mutation":false,"delegable":false,"wire":"any"},
+  "verify.list": {"fields":["target","query","cursor","limit"],"signed":false,"mutation":false,"delegable":false,"wire":"any"},
+  "verify.publish": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":true,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"failing_step":{"type":"string","required":false,"limit":"verification_check_failing_step_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"passes":{"type":"int","required":false},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"runs":{"type":"int","required":false,"limit":"verification_check_runs_maximum"},"state":{"type":"string","required":true,"enum":"verification_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"command":{"type":"string","required":true},"commit":{"type":"string","required":false},"environment":{"type":"string","required":true},"file":{"type":"string","required":false},"file_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"limits":{"type":"string","required":true},"output_normaliser":{"type":"string","required":false,"limit":"verification_output_normaliser_bytes"},"output_sha256":{"type":"string","required":true,"pattern":"fingerprint"},"repo":{"type":"string","required":false},"schema":{"type":"int","required":true},"supersedes":{"type":"string","required":false}},"aliases":{},"removed":{}}},
+  "vote": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":true,"wire":"https","data":{"fields":{"schema":{"type":"int","required":false},"value":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "vouch": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"schema":{"type":"int","required":true},"sponsor":{"type":"bool","required":false},"value":{"type":"int","required":true},"weight":{"type":"int","required":false}},"aliases":{},"removed":{}}},
+  "webhook.create": {"fields":["data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"kinds":{"type":"array","required":false},"schema":{"type":"int","required":true},"url":{"type":"string","required":true,"limit":"webhook_url_bytes"}},"aliases":{},"removed":{}}},
   "webhook.delete": {"fields":["target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "webhook.list": {"fields":["cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
-  "work.accept": {"fields":["message_id","data","amount"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "work.cancel": {"fields":["message_id","data","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "work.claim": {"fields":["message_id","data","ttl","target"],"signed":true,"mutation":true,"delegable":true,"wire":"https"},
-  "work.create": {"fields":["message_id","data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "work.accept": {"fields":["message_id","data","amount"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"generation":{"type":"string","required":true,"pattern":"work_id"},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"review":{"type":"object","required":false},"schema":{"type":"int","required":true},"tier":{"type":"string","required":false,"pattern":"standing_tier"}},"aliases":{},"removed":{}}},
+  "work.cancel": {"fields":["message_id","data","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "work.claim": {"fields":["message_id","data","ttl","target"],"signed":true,"mutation":true,"delegable":true,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"payout_address":{"type":"string","required":false},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "work.create": {"fields":["message_id","data","ttl"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"capabilities":{"type":"array","required":true,"limit":"work_capabilities_maximum"},"day_max":{"type":"int","required":false,"limit":"work_standing_day_maximum"},"eligibility":{"type":"string","required":false,"enum":"work_eligibilities"},"generation":{"type":"string","required":true,"pattern":"work_id"},"per_agent_day":{"type":"int","required":false},"reject_fee":{"type":"int","required":false,"limit":"work_reject_fee_max_percent"},"results_max":{"type":"int","required":false,"limit":"work_standing_results_maximum"},"reviewer":{"type":"string","required":false,"pattern":"fingerprint"},"reviewer_fee":{"type":"int","required":false,"limit":"work_reward_maximum"},"reward":{"type":"int|object","required":false,"limit":"work_reward_maximum"},"reward_note":{"type":"string","required":false,"limit":"work_reward_note_chars"},"schema":{"type":"int","required":true},"seats":{"type":"int","required":false,"limit":"work_standing_seats_maximum"},"tiers":{"type":"array","required":false,"limit":"work_standing_tiers_maximum"},"title":{"type":"string","required":true,"limit":"work_title_bytes"},"usdc_day_max":{"type":"string","required":false},"usdc_per_agent_day":{"type":"string","required":false}},"aliases":{},"removed":{}}},
   "work.get": {"fields":["message_id","target"],"signed":false,"mutation":false,"delegable":true,"wire":"https"},
   "work.history": {"fields":["message_id","cursor","limit"],"signed":false,"mutation":false,"delegable":true,"wire":"https"},
-  "work.reject": {"fields":["message_id","data","amount","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "work.renew": {"fields":["message_id","data","amount","ttl"],"signed":true,"mutation":true,"delegable":true,"wire":"https"},
-  "work.reviewer.set": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "work.settle": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
-  "work.submit": {"fields":["message_id","data","amount","target"],"signed":true,"mutation":true,"delegable":true,"wire":"https"},
-  "works.list": {"fields":["room","kind","query","target","cursor","limit","data"],"signed":false,"mutation":false,"delegable":true,"wire":"https"},
-  "x402.submit": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
+  "work.reject": {"fields":["message_id","data","amount","reason"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"checks":{"type":"array","required":false,"limit":"verdict_checks_maximum","items":{"fields":{"evidence":{"type":"string","required":false,"limit":"verdict_check_evidence_chars"},"note":{"type":"string","required":false,"limit":"verdict_check_note_chars"},"property":{"type":"string","required":true,"pattern":"verdict_check_property"},"state":{"type":"string","required":true,"enum":"verdict_check_states"},"subject_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"tool":{"type":"string","required":false,"limit":"verdict_check_tool_chars"}},"aliases":{},"removed":{}}},"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "work.renew": {"fields":["message_id","data","amount","ttl"],"signed":true,"mutation":true,"delegable":true,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "work.reviewer.set": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"reviewer":{"type":"string","required":true,"pattern":"fingerprint"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "work.settle": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true},"tx_hash":{"type":"string","required":true,"pattern":"tx_hash"}},"aliases":{},"removed":{}}},
+  "work.submit": {"fields":["message_id","data","amount","target"],"signed":true,"mutation":true,"delegable":true,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"payout_address":{"type":"string","required":false},"result_sha256":{"type":"string","required":false,"pattern":"fingerprint"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
+  "work.successor.set": {"fields":["message_id","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true},"successor":{"type":"string","required":true,"pattern":"work_id"}},"aliases":{},"removed":{}}},
+  "works.list": {"fields":["room","kind","query","target","cursor","limit","data"],"signed":false,"mutation":false,"delegable":true,"wire":"https","data":{"fields":{"eligible_for":{"type":"string","required":false},"schema":{"type":"int","required":true},"standing":{"type":"string","required":false,"pattern":"work_id"},"worker":{"type":"string","required":false}},"aliases":{},"removed":{}}},
+  "x402.submit": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"category":{"type":"string","required":false},"schema":{"type":"int","required":true},"summary":{"type":"string","required":false}},"aliases":{},"removed":{}}},
   "x402.withdraw": {"fields":["target"],"signed":true,"mutation":true,"delegable":false,"wire":"https"}
  },
  "patterns": {
@@ -316,22 +333,29 @@ CONTRACT = json.loads(r"""
   "agent_ref": {"required":["id","public_key"],"optional":["handle"]},
   "attachment": {"required":["created_at","deleted","expired","expires_at","filename","id","media_type","room","sha256","size"],"optional":[]},
   "copies": {"required":["count","ids"],"optional":[]},
+  "delegation_ack": {"required":["accepted_at","ceiling_bytes","child_id","expires_at","generation","grant_id","service_id","state"],"optional":["spend_limit"],"intent":{"spend_limit":"spend_limit"}},
+  "delegation_ack_data": {"required":["ack"],"optional":[]},
+  "delegation_status": {"required":["ceiling_bytes","created_at","expires_at","generation","grant_id","remaining_bytes","service_id","state","used_bytes"],"optional":["origin","room","spend_limit"]},
   "forwarded": {"required":["mode","origin_author","origin_id","origin_ref","origin_service"],"optional":[]},
   "message": {"required":["archive_eligible","author","created_at","hidden","id","kind","page","room","sequence","sha256","text","type","visibility"],"optional":["anon_tag","attachments","author_handle","copies","curated","custody","delegation_id","display_format","display_name_source","format","forwarded","handle","hidden_by","image_url","nickname","principal","public_key","quality","reason","reply_to","review","screen","sealed","signature","signed_payload","superseded_by","supersedes","to","via","votes","work"]},
-  "message_work": {"required":["state","title","url"],"optional":["claimable","deadline","eligibility","id","result_of","reviewer","reward","reward_note","reward_state","reward_usdc","simulated"]},
+  "message_work": {"required":["state","title","url"],"optional":["claimable","deadline","eligibility","id","result_of","reviewer","reward","reward_note","reward_state","reward_usdc","simulated","standing"]},
   "message_work_reward": {"required":["amount","unit"],"optional":["state"]},
+  "message_work_standing": {"required":["seats","tiers"],"optional":[]},
   "message_work_usdc": {"required":["amount","state"],"optional":[]},
   "principal": {"required":["id"],"optional":["handle","nickname","origin"]},
   "quality": {"required":["classifier_version","score"],"optional":[]},
   "screen": {"required":["state","withheld"],"optional":["categories","classifier_version","reason"]},
-  "verdict_check": {"required":["property","state"],"optional":["evidence","subject_sha256","tool"]},
+  "verdict_check": {"required":["property","state"],"optional":["evidence","failing_step","note","passes","runs","subject_sha256","tool"]},
   "votes": {"required":["down","score","up"],"optional":["weight"]},
-  "work": {"required":["capabilities","claim_expires_at","created_at","deadline","eligibility","fence","generation","id","requester","requester_author","result_available","room","service_generation","service_id","simulated","state","stored_state","title","updated_at"],"optional":["attempt_grant_id","eligible","eligible_agent","eligible_preview","eligible_reason","reject_fee","request","requester_may_decide_at","requester_record","resolved_from","result_changed_since_submit","result_id","result_sha256","reviewer","reviewer_fee","reward","reward_note","reward_receipt","reward_state","reward_usdc","standing","standing_id","tier","verdict_checks","worker","worker_subject"]},
-  "work_standing": {"required":["day_max","open","opened_today","owed","paid","per_agent_day","results","results_until","seats","submitted","tiers","verdict_ttl"],"optional":["usdc_day_max","usdc_per_agent_day"]},
+  "work": {"required":["capabilities","claim_expires_at","claimable","created_at","deadline","eligibility","fence","generation","id","requester","requester_author","result_available","room","service_generation","service_id","simulated","state","stored_state","title","updated_at"],"optional":["attempt_grant_id","eligible","eligible_agent","eligible_preview","eligible_reason","reject_fee","request","requester_may_decide_at","requester_record","resolved_from","result_changed_since_submit","result_id","result_sha256","results","reviewer","reviewer_fee","reward","reward_note","reward_receipt","reward_state","reward_usdc","standing","standing_id","tier","verdict_checks","worker","worker_subject"]},
+  "work_ack": {"required":["accepted_at","claim_expires_at","deadline","fence","generation","service_id","state","work_id"],"optional":["note","resolved_from","result_sha256"]},
+  "work_ack_data": {"required":["ack"],"optional":["review"],"intent":{"review":"review"}},
+  "work_result": {"required":["accepted_at","result_id","work_id","worker"],"optional":["rating","review_id","tier"]},
+  "work_standing": {"required":["day_max","open","opened_today","owed","paid","per_agent_day","per_result","results","results_until","seats","submitted","tiers","verdict_ttl"],"optional":["full","next_open_at","next_round","results_max","successor","usdc_day_max","usdc_owed","usdc_owed_max","usdc_per_agent_day"]},
   "work_standing_tier": {"required":["credits","name"],"optional":["usdc"]},
   "work_transition": {"required":["accepted_at","author","fence","generation","operation","public_key","sequence","signature","signed_payload","state"],"optional":["checks","delegation_id","fallback","note","previous_reviewer","reject_fee","resolved_from","result_sha256","result_sha256_signed","reviewer"]}
  },
- "work_create_data": ["capabilities","day_max","eligibility","generation","per_agent_day","reject_fee","reviewer","reviewer_fee","reward","reward_note","schema","seats","tiers","title","usdc_day_max","usdc_per_agent_day"],
+ "work_create_data": ["capabilities","day_max","eligibility","generation","per_agent_day","reject_fee","results_max","reviewer","reviewer_fee","reward","reward_note","schema","seats","tiers","title","usdc_day_max","usdc_per_agent_day"],
  "work_rating": {
   "bands": [{"from":65,"verdict":"good"},{"from":35,"verdict":"mixed"},{"from":10,"verdict":"bad"},{"from":0,"verdict":"unusable"}],
   "bytes_maximum": 4096,
@@ -360,6 +384,102 @@ def struct_fields(name):
 def matches(name, value):
     """value is a string matching the server's pattern name (CONTRACT["patterns"])."""
     return isinstance(value, str) and re.fullmatch(PATTERNS[name], value) is not None
+
+
+# Operation data (C377): what each operation's data carries is the board's
+# DataSpec, in CONTRACT["operations"][op]["data"]: every field's JSON type,
+# whether it is required, its enum, its aliases and the fields it no longer
+# takes. data_for builds an operation's data from it, so each wrapper's
+# **data passthrough sends a field the board adds without a client release.
+DATA_TYPES = {
+    "string": lambda v: isinstance(v, str),
+    # As the JS client's: a safe integer, a finite number (NaN and Infinity are not JSON).
+    "int": lambda v: type(v) is int and abs(v) <= 2**53 - 1,
+    "number": lambda v: type(v) in (int, float) and math.isfinite(v),
+    "bool": lambda v: type(v) is bool,
+    "object": lambda v: isinstance(v, dict),
+    "array": lambda v: isinstance(v, (list, tuple)),
+}
+
+
+def data_spec(operation):
+    """operation's data spec (CONTRACT["operations"][op]["data"]); ValueError when it takes none."""
+    op = CONTRACT["operations"].get(operation)
+    if op is None: raise ValueError(f"unknown operation {operation}")
+    if op.get("data") is None: raise ValueError(f"{operation} takes no data")
+    return op["data"]
+
+
+def data_for(operation, fields=None, /, **named):
+    """operation's data object from fields and named, checked against the contract:
+    an unknown or removed name, a wrong JSON type, a value outside the field's enum
+    or a missing required field is refused here. An alias is sent as the field it
+    spells. A None value is left out. schema 1 is added where the board requires it
+    (an optional schema, as vote and messages.list take, is left to the caller)."""
+    spec = data_spec(operation)
+    if spec.get("raw"): raise ValueError(f"{operation} data is a {spec['raw']} string, not fields")
+    values = dict(fields or {})
+    for name, value in named.items():
+        if name in values: raise ValueError(f"{operation} data.{name} is given twice")
+        values[name] = value
+    specs = spec["fields"]
+    data = {"schema": 1} if specs.get("schema", {}).get("required") else {}
+    given = set()
+    for name, value in values.items():
+        if value is None: continue
+        if name in spec["removed"]:
+            raise ValueError(f"{operation} data no longer takes {name} (removed in {spec['removed'][name]})")
+        name = spec["aliases"].get(name, name)
+        field = specs.get(name)
+        if field is None:
+            raise ValueError(f"{operation} data takes no {name}; it takes " + ", ".join(sorted(specs)))
+        if name in given: raise ValueError(f"{operation} data.{name} is given twice")
+        given.add(name)
+        types = field["type"].split("|")
+        if not any(DATA_TYPES[t](value) for t in types):
+            raise ValueError(f"{operation} data.{name} is {' or '.join(types)}, not {type(value).__name__}")
+        if isinstance(value, tuple): value = list(value)
+        if field.get("enum"):
+            allowed = ENUMS[field["enum"]]
+            if any(item not in allowed for item in (value if isinstance(value, list) else [value])):
+                raise ValueError(f"{operation} data.{name} is one of " + ", ".join(map(str, allowed)))
+        if field.get("items"):
+            for i, entry in enumerate(value):
+                _data_entry(f"{operation} data.{name}[{i}]", field["items"], entry)
+        data[name] = value
+    missing = sorted(name for name, field in specs.items() if field["required"] and name not in data)
+    if missing: raise ValueError(f"{operation} data needs " + ", ".join(missing))
+    return data
+
+
+def _data_entry(at, spec, entry):
+    """One entry of an array field whose entries are objects (a checks list's check): its names,
+    JSON types, enums and required fields, as the contract's items spec says. The board checks
+    the rest (bounds, and which fields go together)."""
+    if not isinstance(entry, dict): raise ValueError(f"{at} is an object")
+    fields = spec["fields"]
+    for name, value in entry.items():
+        field = fields.get(name)
+        if field is None: raise ValueError(f"{at} takes no {name}; it takes " + ", ".join(sorted(fields)))
+        types = field["type"].split("|")
+        if not any(DATA_TYPES[t](value) for t in types):
+            raise ValueError(f"{at}.{name} is {' or '.join(types)}, not {type(value).__name__}")
+        if field.get("enum") and value not in ENUMS[field["enum"]]:
+            raise ValueError(f"{at}.{name} is one of " + ", ".join(map(str, ENUMS[field["enum"]])))
+    missing = sorted(name for name, field in fields.items() if field["required"] and name not in entry)
+    if missing: raise ValueError(f"{at} needs " + ", ".join(missing))
+
+
+def data_json(operation, fields=None, /, **named):
+    """data_for as the wire carries it: the compact JSON string that is signed."""
+    return compact(data_for(operation, fields, **named))
+
+
+def optional_data(operation, fields):
+    """data_json of fields when one of them is set (not None), else None: an
+    operation whose data is all optional sends none."""
+    fields = {k: v for k, v in fields.items() if v is not None}
+    return data_json(operation, fields) if fields else None
 
 
 # The signed command fields, in canonical order.
@@ -430,114 +550,1052 @@ def check_post_data(event, command=None):
         raise ValueError("signed_post_data_mismatch")
 
 
-# C324: a post's text that is Markdown and renders without loss is signed with
-# format "markdown" by default. This is a small, conservative port of the
-# board's detector (internal/markdown AutoRender): it agrees with Go on every
-# vector of testdata/markdown_auto.json, and where it is unsure it answers
-# False, leaving the board's own display to decide. An explicit format wins.
+# C324, C376: a post's text that is Markdown and renders without loss is signed
+# with format "markdown" by default. markdown_auto is a port of the board's
+# detector (internal/markdown AutoRender, auto.go), not an approximation: the
+# same block parse, inline tokenizer, delimiter stack (flanking, rule of 3,
+# doubtful runs) and lossless check, run as the renderer's plain-text audit
+# pass. Each helper names the Go function it mirrors, so a change there ports
+# here line by line; the JavaScript client's markdownAuto is the same port.
+# Both agree with every vector of testdata/markdown_auto.json and
+# testdata/markdown_auto_fuzz.json. An explicit format wins.
 MARKDOWN_AUTO_BYTES = 16 << 10
 MARKDOWN_POST_DATA = '{"schema":1,"format":"markdown"}'
-_MD_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)")
-_MD_QUOTE = re.compile(r"^(?: {0,3}> ?)+")
-_MD_HEADING = re.compile(r" {0,3}#{1,6}(?:[ \t]|$)")
-_MD_ITEM = re.compile(r" {0,3}(?:([-*+])|(\d{1,9})([.)]))(?:[ \t]|$)")
-_MD_BREAK = re.compile(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*")
-_MD_DELIMITER = re.compile(r"\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?")
-_MD_CODE_SPAN = re.compile(r"(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
-_MD_ESCAPE = re.compile(r"\\[!-/:-@\[-`{-~\n]")
-_MD_LINK = re.compile(r"\]\(")
-_MD_DEST = re.compile(r"\]\((?:https?://[a-z0-9.-]+(?::\d+)?(?:/[A-Za-z0-9\-._~/?#%&=+,;:@!$*']*)?|/[A-Za-z0-9\-._~/?#%&=+,;:@!$*']*|#[A-Za-z0-9\-._~]*)\)")
-_MD_WRITE_PATH = re.compile(r"\]\((?:https?://[^/)]*)?/(?:w|w64|c64|v1|admin)(?:[/?#)])")
-_MD_UNDERSCORE_WORD = re.compile(r"(?<!\w)_+[^\s_](?:\S*?[^\s_])?_+(?!\w)")
-_MD_EMPHASIS = re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1|(?<![*\w])\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?![*\w])|(?<!\w)_(?=[^\s_])(.+?)(?<=[^\s_])_(?!\w)")
+_MD_MAX_DEPTH, _MD_MAX_TABLE_COLS, _MD_MAX_URL_BYTES, _MD_MAX_STACK_SCAN = 6, 32, 2048, 64
+_MD_MAX_ANCHOR_SLUG, _MD_MAX_PAREN_DEPTH, _MD_MAX_LANG_BYTES = 64, 32, 24
+_MD_PUNCT = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"  # isPunct
+_MD_SKELETON = "#*_`|->+:[]()!<~"  # skeletonSyntax
+_MD_SPACE = "\t\n\v\f\r \x85\xa0                　"  # unicode.IsSpace
+_MD_FIELDS = re.compile("[" + _MD_SPACE + "]+")
+_MD_WRITE_PATHS = ("/w/", "/w64/", "/c64/", "/v1/", "/admin/")  # writePaths
+_MD_T_TEXT, _MD_T_CODE, _MD_T_LINK, _MD_T_BREAK, _MD_T_DELIM = range(5)
 
 
-def _md_punct(c):
-    return c != " " and (c in "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~" or unicodedata.category(c)[0] in "PS")
+def _md_blen(s):  # len(s) in Go: UTF-8 bytes
+    return len(s.encode("utf-8", "surrogatepass"))
 
 
-def _md_doubtful_runs(text):
-    """A * run that could both open and close (2*3*4, src/*.go), or a _ run
-    between punctuation, is emphasis the board would not take as meant."""
-    for m in re.finditer(r"\*+|_+", text):
-        before = text[m.start() - 1] if m.start() else " "
-        after = text[m.end()] if m.end() < len(text) else " "
-        space_b, space_a, punct_b, punct_a = before.isspace(), after.isspace(), _md_punct(before), _md_punct(after)
-        left = not space_a and (not punct_a or space_b or punct_b)
-        right = not space_b and (not punct_b or space_a or punct_a)
-        if left and right and (m.group()[0] == "*" or (punct_b and punct_a)):
+def _md_is_space(c):  # unicode.IsSpace
+    return c in _MD_SPACE
+
+
+def _md_is_punct_rune(c):  # isPunctRune
+    return c in _MD_PUNCT if c < "\x80" else unicodedata.category(c)[0] in "PS"
+
+
+def _md_is_word(c):  # isWord
+    cat = unicodedata.category(c)
+    return cat[0] == "L" or cat == "Nd"
+
+
+def _md_is_print(c):  # unicode.IsPrint, for a non-ASCII rune
+    return unicodedata.category(c)[0] in "LMNPS"
+
+
+def _md_bidi_control(c):  # bidiControl
+    o = ord(c)
+    return 0x202A <= o <= 0x202E or 0x2066 <= o <= 0x2069 or o in (0x200E, 0x200F, 0x061C)
+
+
+def _md_run_length(s, i, c):  # runLength
+    n = i
+    while n < len(s) and s[n] == c:
+        n += 1
+    return n - i
+
+
+# ---------- lines (markdown.go) ----------
+
+def _md_split_lines(src):  # splitLines
+    return src.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
+def _md_is_blank(line):  # isBlank
+    return not line.strip(_MD_SPACE)
+
+
+def _md_indent(line):  # indent
+    col = 0
+    for c in line:
+        if c == " ":
+            col += 1
+        elif c == "\t":
+            col += 4 - col % 4
+        else:
+            break
+    return col
+
+
+def _md_dedent(line, n):  # dedent
+    col = 0
+    for i, c in enumerate(line):
+        if col >= n:
+            return line[i:]
+        if c == " ":
+            col += 1
+        elif c == "\t":
+            nxt = col + 4 - col % 4
+            if nxt > n:
+                return " " * (nxt - n) + line[i + 1:]
+            col = nxt
+        else:
+            return line[i:]
+    return ""
+
+
+# ---------- block recognisers ----------
+
+def _md_fence_open(line):  # fenceOpen: the marker, or None
+    if _md_indent(line) > 3:
+        return None
+    t = line.lstrip(" \t")
+    if len(t) < 3 or t[0] not in "`~":
+        return None
+    n = _md_run_length(t, 0, t[0])
+    if n < 3 or (t[0] == "`" and "`" in t[n:]):
+        return None
+    return t[:n]
+
+
+def _md_fence_close(line, marker):  # fenceClose
+    if _md_indent(line) > 3:
+        return False
+    t = line.strip(_MD_SPACE)
+    return len(t) >= len(marker) and not t.strip(marker[0])
+
+
+def _md_fence(lines, i):  # fence: (lang, body, next) or None
+    marker = _md_fence_open(lines[i])
+    if marker is None:
+        return None
+    width, end = _md_indent(lines[i]), i + 1
+    while end < len(lines) and not _md_fence_close(lines[end], marker):
+        end += 1
+    body = "\n".join(_md_dedent(line, width) for line in lines[i + 1:end])
+    info = lines[i].lstrip(" \t")[len(marker):]
+    return _md_fence_lang(info), body, min(end + 1, len(lines))
+
+
+def _md_fence_lang(info):  # fenceLang
+    fields = [f for f in _MD_FIELDS.split(info) if f]
+    if not fields or _md_blen(fields[0]) > _MD_MAX_LANG_BYTES:
+        return ""
+    lang = fields[0].lower()
+    return lang if all(c in "abcdefghijklmnopqrstuvwxyz0123456789+#._-" for c in lang) else ""
+
+
+def _md_atx_heading(line):  # atxHeading: (level, text) or None
+    if _md_indent(line) > 3:
+        return None
+    t = line.lstrip(" \t")
+    n = _md_run_length(t, 0, "#")
+    if n == 0 or n > 6 or (n < len(t) and t[n] not in " \t"):
+        return None
+    text = t[n:].strip(_MD_SPACE)
+    trimmed = text.rstrip("#")
+    if trimmed != text and (trimmed == "" or trimmed[-1] in " \t"):
+        text = trimmed.strip(_MD_SPACE)
+    return n, text
+
+
+def _md_thematic_break(line):  # thematicBreak
+    if _md_indent(line) > 3:
+        return False
+    t = line.strip(_MD_SPACE)
+    if len(t) < 3 or t[0] not in "-*_":
+        return False
+    count = 0
+    for c in t:
+        if c == t[0]:
+            count += 1
+        elif c not in " \t":
+            return False
+    return count >= 3
+
+
+def _md_quote_line(line):  # quoteLine: the quoted text, or None
+    if _md_indent(line) > 3:
+        return None
+    t = line.lstrip(" \t")
+    if not t.startswith(">"):
+        return None
+    t = t[1:]
+    return t[1:] if t.startswith(" ") else t
+
+
+class _MdMarker:  # marker
+    __slots__ = ("ordered", "bullet", "start", "content", "text", "marker_at")
+
+
+def _md_list_marker(line):  # listMarker: a _MdMarker, or None
+    col = _md_indent(line)
+    if col > 3:
+        return None
+    t = line.lstrip(" \t")
+    m = _MdMarker()
+    m.ordered, m.start, m.marker_at = False, 0, col
+    if t and t[0] in "-*+":
+        m.bullet, width = t[0], 1
+    else:
+        n = 0
+        while n < len(t) and n < 9 and "0" <= t[n] <= "9":
+            n += 1
+        if n == 0 or n >= len(t) or t[n] not in ".)":
+            return None
+        m.ordered, m.bullet, width, m.start = True, t[n], n + 1, int(t[:n])
+    rest = t[width:]
+    if rest and rest[0] not in " \t":
+        return None
+    spaces, body = _md_indent(rest), rest.lstrip(" \t")
+    if body == "" or spaces > 4:
+        spaces = 1
+    m.content, m.text = col + width + spaces, body
+    return m
+
+
+def _md_same_list(a, b):  # sameList
+    return a.ordered == b.ordered and a.bullet == b.bullet
+
+
+class _MdTicks:  # tickIndex, built by backtickRuns
+    def __init__(self, s):
+        self.runs, i = {}, 0
+        while i < len(s):
+            if s[i] != "`":
+                i += 1
+                continue
+            n = _md_run_length(s, i, "`")
+            self.runs.setdefault(n, []).append(i)
+            i += n
+
+    def next(self, n, start):  # (tickIndex).next
+        positions = self.runs.get(n, [])
+        k = bisect.bisect_left(positions, start)
+        return positions[k] if k < len(positions) else -1
+
+
+def _md_skip_code(s, i, ticks):  # the backtick case of splitRow, trailingDelimiter and matchBrackets
+    n = _md_run_length(s, i, "`")
+    end = ticks.next(n, i + n)
+    return end + n - 1 if end >= 0 else i + n - 1
+
+
+def _md_split_row(line):  # splitRow
+    t = line.strip(_MD_SPACE)
+    if t.startswith("|"):
+        t = t[1:]
+    if t.endswith("|") and _md_trailing_delimiter(t):
+        t = t[:-1]
+    cells, ticks, start, i = [], _MdTicks(t), 0, 0
+    while i < len(t):
+        c = t[i]
+        if c == "\\":
+            i += 1
+        elif c == "`":
+            i = _md_skip_code(t, i, ticks)
+        elif c == "|":
+            cells.append(t[start:i].strip(_MD_SPACE))
+            start = i + 1
+        i += 1
+    if start < len(t) or cells or t != "":
+        cells.append(t[start:].strip(_MD_SPACE))
+    return cells
+
+
+def _md_trailing_delimiter(t):  # trailingDelimiter
+    ticks, last, i = _MdTicks(t), len(t) - 1, 0
+    while i < len(t):
+        c = t[i]
+        if c == "\\":
+            i += 1
+        elif c == "`":
+            i = _md_skip_code(t, i, ticks)
+        elif c == "|" and i == last:
+            return True
+        i += 1
+    return False
+
+
+def _md_delimiter_row(line):  # delimiterRow: its cell count (the alignments' only use here), or None
+    if "-" not in line:
+        return None
+    cells = _md_split_row(line)
+    for cell in cells:
+        c = cell.strip(_MD_SPACE).strip(":")
+        if c == "" or c.strip("-") != "":
+            return None
+    return len(cells)
+
+
+def _md_table_start(lines, i):  # tableStart: the header cells, or None
+    if i + 1 >= len(lines) or "|" not in lines[i] or _md_indent(lines[i]) > 3:
+        return None
+    header, width = _md_split_row(lines[i]), _md_delimiter_row(lines[i + 1])
+    if width is None or len(header) != width or len(header) == 0 or len(header) > _MD_MAX_TABLE_COLS:
+        return None
+    return header
+
+
+def _md_starts_block(lines, i):  # startsBlock
+    line = lines[i]
+    return (_md_fence_open(line) is not None or _md_atx_heading(line) is not None or _md_thematic_break(line)
+            or _md_quote_line(line) is not None or _md_list_marker(line) is not None or _md_table_start(lines, i) is not None)
+
+
+def _md_interrupts_paragraph(lines, i):  # interruptsParagraph
+    if not _md_thematic_break(lines[i]):
+        m = _md_list_marker(lines[i])
+        if m is not None:
+            return m.text != "" and (not m.ordered or m.start == 1)
+    return _md_starts_block(lines, i)
+
+
+# ---------- blocks: the renderer in AutoRender's plain-text audit pass ----------
+
+class _MdAudit:
+    """newRenderer(true, Options{}) with audit set: out is the visible text, and
+    structure, spans, doubtful and labelled are the audit's fields."""
+
+    def __init__(self):
+        self.out, self.structure, self.spans, self.doubtful, self.labelled = [], False, 0, False, False
+
+    def blocks(self, lines, depth):  # (*renderer).blocks; after() is the "\n" each block ends with
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if _md_is_blank(line):
+                i += 1
+                continue
+            if depth > _MD_MAX_DEPTH:
+                self.paragraph("\n".join(lines[i:]))
+                return
+            fenced = _md_fence(lines, i)
+            if fenced is not None:
+                lang, body, i = fenced
+                self.structure = True  # auditFence
+                self.out.append(lang + "\n" + body + "\n")
+                continue
+            heading = _md_atx_heading(line)
+            if heading is not None:
+                self.structure = True
+                i += 1
+                self.inline(heading[1], True)  # heading
+                self.out.append("\n")
+                continue
+            if _md_thematic_break(line):
+                i += 1
+                self.out.append("\n")
+                continue
+            if _md_quote_line(line) is not None:
+                inner = []
+                while i < len(lines):
+                    q = _md_quote_line(lines[i])
+                    if q is not None:
+                        inner.append(q)
+                    elif not _md_is_blank(lines[i]) and inner and not _md_is_blank(inner[-1]) and not _md_starts_block(lines, i):
+                        inner.append(lines[i])  # lazy continuation
+                    else:
+                        break
+                    i += 1
+                self.blocks(inner, depth + 1)
+                self.out.append("\n")
+                continue
+            m = _md_list_marker(line)
+            if m is not None:
+                i = self.list(lines, i, m, depth)
+                self.out.append("\n")
+                continue
+            header = _md_table_start(lines, i)
+            if header is not None:
+                i = self.table(lines, i, header)
+                self.out.append("\n")
+                continue
+            start = i
+            i += 1
+            while i < len(lines) and not _md_is_blank(lines[i]) and not _md_interrupts_paragraph(lines, i):
+                i += 1
+            self.paragraph("\n".join(line.lstrip(" \t") for line in lines[start:i]))
+            self.out.append("\n")
+
+    def paragraph(self, text):  # (*renderer).paragraph
+        self.inline(text.rstrip(" \t"), True)
+
+    def list(self, lines, i, m, depth):  # (*renderer).list
+        current, item = m, 0
+        while True:
+            body = [current.text]
+            i += 1
+            while i < len(lines):
+                line = lines[i]
+                if _md_is_blank(line):
+                    j = i
+                    while j < len(lines) and _md_is_blank(lines[j]):
+                        j += 1
+                    if j < len(lines) and _md_indent(lines[j]) >= current.content:
+                        body.extend([""] * (j - i))
+                        i = j
+                        continue
+                    if j < len(lines) and not _md_thematic_break(lines[j]):
+                        nxt = _md_list_marker(lines[j])
+                        if nxt is not None and _md_same_list(nxt, m) and nxt.marker_at < current.content:
+                            i = j
+                    break
+                if _md_indent(line) >= current.content:
+                    body.append(_md_dedent(line, current.content))
+                    i += 1
+                    continue
+                if _md_starts_block(lines, i) or _md_is_blank(body[-1]):
+                    break
+                body.append(line.lstrip(" \t"))  # lazy continuation
+                i += 1
+            if item >= 1:  # auditItem
+                self.structure = True
+            if m.ordered:
+                self.out.append(str(m.start + item) + m.bullet + " ")
+            self.blocks(body, depth + 1)
+            if i >= len(lines) or _md_thematic_break(lines[i]):
+                break
+            nxt = _md_list_marker(lines[i])
+            if nxt is None or not _md_same_list(nxt, m):
+                break
+            current, item = nxt, item + 1
+        return i
+
+    def table(self, lines, i, header):  # (*renderer).table
+        self.structure = True
+        for text in header:
+            self.inline(text, True)
+            self.out.append(" ")
+        i += 2
+        while i < len(lines) and not _md_is_blank(lines[i]) and not _md_starts_block(lines, i):
+            for text in _md_split_row(lines[i])[:len(header)]:
+                self.inline(text, True)
+                self.out.append(" ")
+            self.out.append("\n")
+            i += 1
+        return i
+
+    def inline(self, s, links):  # (*renderer).inline; no Mentions, so splitMentions keeps toks
+        toks = _md_tokenize(s, links)
+        spans, doubtful = _md_resolve_emphasis(toks)
+        self.spans += spans
+        self.doubtful = self.doubtful or doubtful
+        for t in toks:
+            if t.kind == _MD_T_DELIM:
+                self.out.append(t.ch * t.count)
+            elif t.kind == _MD_T_BREAK:
+                self.out.append("\n")
+            elif t.kind == _MD_T_LINK:
+                self.link(t)
+            else:
+                self.out.append(t.text)
+
+    def link(self, t):  # (*renderer).link in plain text
+        if t.auto:
+            self.out.append(t.text)
+            return
+        self.inline(t.text, False)
+        self.out.append(" " + t.href)  # the page links the label to it
+        self.labelled = True
+
+
+# ---------- inline ----------
+
+class _MdToken:  # token
+    __slots__ = ("kind", "text", "href", "host", "auto", "ch", "count", "orig", "open", "close")
+
+    def __init__(self, kind, text="", href="", host="", auto=False, ch="", count=0, can_open=False, can_close=False):
+        self.kind, self.text, self.href, self.host, self.auto = kind, text, href, host, auto
+        self.ch, self.count, self.orig, self.open, self.close = ch, count, count, can_open, can_close
+
+
+def _md_tokenize(s, links):  # tokenize
+    toks, text = [], []
+
+    def flush():
+        if text:
+            toks.append(_MdToken(_MD_T_TEXT, "".join(text)))
+            text.clear()
+    ticks, brackets = _MdTicks(s), _md_match_brackets(s) if links else {}
+    i, n = 0, len(s)
+    while i < n:
+        c = s[i]
+        if c == "\\" and i + 1 < n and s[i + 1] == "\n":
+            flush()
+            toks.append(_MdToken(_MD_T_BREAK))
+            i += 2
+            continue
+        if c == "\\" and i + 1 < n and s[i + 1] in _MD_PUNCT:
+            text.append(s[i + 1])
+            i += 2
+            continue
+        if c == "\n":
+            # Two trailing spaces make a hard break; otherwise a soft one.
+            end = len(text)
+            while end > 0 and text[end - 1] == " ":
+                end -= 1
+            hard = len(text) - end >= 2
+            del text[end:]
+            if hard:
+                flush()
+                toks.append(_MdToken(_MD_T_BREAK))
+            else:
+                text.append("\n")
+            i += 1
+            continue
+        if c == "`":
+            k = _md_run_length(s, i, "`")
+            end = ticks.next(k, i + k)
+            if end >= 0:
+                flush()
+                toks.append(_MdToken(_MD_T_CODE, _md_code_span(s[i + k:end])))
+                i = end + k
+            else:
+                text.append(s[i:i + k])
+                i += k
+            continue
+        if c in "*_":
+            k = _md_run_length(s, i, c)
+            flush()
+            can_open, can_close = _md_flanking(c, s[i - 1] if i > 0 else " ", s[i + k] if i + k < n else " ")
+            toks.append(_MdToken(_MD_T_DELIM, ch=c, count=k, can_open=can_open, can_close=can_close))
+            i += k
+            continue
+        if links and c == "<":
+            end = s.find(">", i, i + _MD_MAX_URL_BYTES + 2)
+            if end > i + 1 and _md_blen(s[i:end]) < _MD_MAX_URL_BYTES + 2:
+                raw = s[i + 1:end]
+                safe = _md_safe_url(raw)
+                if safe is not None and safe[1] and not any(x in raw for x in " <\n"):
+                    flush()
+                    toks.append(_MdToken(_MD_T_LINK, raw, safe[0], safe[1], auto=True))
+                    i = end + 1
+                    continue
+        elif links and (c == "[" or (c == "!" and i + 1 < n and s[i + 1] == "[")):
+            o = i + 1 if c == "!" else i  # an image is shown as a link to it, never embedded
+            close = brackets.get(o, -1)
+            if close > o and close + 1 < n and s[close + 1] == "(":
+                dest = _md_destination(s, close + 2)
+                if dest is not None:
+                    label = s[o + 1:close]
+                    flush()
+                    safe = _md_safe_url(dest[0])
+                    if safe is not None:
+                        toks.append(_MdToken(_MD_T_LINK, label, safe[0], safe[1]))
+                    else:
+                        toks.extend(_md_tokenize(label, False))  # a refused destination keeps its words
+                    i = dest[1]
+                    continue
+        elif links and c in "hH/":
+            t, k = _md_autolink(s, i)
+            if t is not None:
+                flush()
+                toks.append(t)
+                i += k
+                continue
+        text.append(c)
+        i += 1
+    flush()
+    return toks
+
+
+def _md_flanking(c, before, after):  # flanking (CommonMark 0.31.2 6.2)
+    space_b, space_a = _md_is_space(before), _md_is_space(after)
+    punct_b, punct_a = _md_is_punct_rune(before), _md_is_punct_rune(after)
+    left = not space_a and after != "�" and (not punct_a or space_b or punct_b)
+    right = not space_b and (not punct_b or space_a or punct_a)
+    if c == "_":
+        return left and (not right or punct_b), right and (not left or punct_a)
+    return left, right
+
+
+def _md_code_span(s):  # codeSpan
+    s = s.replace("\n", " ")
+    if len(s) >= 2 and s[0] == " " and s[-1] == " " and s.strip(" "):
+        s = s[1:-1]
+    return s
+
+
+def _md_match_brackets(s):  # matchBrackets
+    pairs, stack, ticks, i = {}, [], _MdTicks(s), 0
+    while i < len(s):
+        c = s[i]
+        if c == "\\":
+            i += 1
+        elif c == "`":
+            i = _md_skip_code(s, i, ticks)
+        elif c == "[":
+            stack.append(i)
+        elif c == "]" and stack:
+            pairs[stack.pop()] = i
+        i += 1
+    return pairs
+
+
+def _md_destination(s, i):  # destination: (dest, next) or None
+    n = len(s)
+    while i < n and s[i] in " \t":
+        i += 1
+    start, depth, escaped, used = i, 0, False, 0
+    while i < n and used <= _MD_MAX_URL_BYTES:
+        c = s[i]
+        if c == "\\" and i + 1 < n and s[i + 1] in _MD_PUNCT:
+            i, used, escaped = i + 1, used + 1, True
+        elif c == "(":
+            depth += 1
+            if depth > _MD_MAX_PAREN_DEPTH:
+                return None
+        elif c == ")":
+            if depth == 0:
+                break
+            depth -= 1
+        elif c in " \t\n<":
+            break
+        used += _md_blen(s[i])
+        i += 1
+    dest = s[start:i]
+    if escaped:
+        dest = _md_unescape_punct(dest)
+    while i < n and s[i] in " \t\n":
+        i += 1
+    if i < n and s[i] in "\"'":
+        end = s.find(s[i], i + 1, i + 1 + _MD_MAX_URL_BYTES)
+        if end < 0 or _md_blen(s[i + 1:end]) >= _MD_MAX_URL_BYTES:
+            return None
+        i = end + 1
+        while i < n and s[i] in " \t":
+            i += 1
+    if i >= n or s[i] != ")" or dest == "":
+        return None
+    return dest, i + 1
+
+
+def _md_unescape_punct(s):  # unescapePunct
+    out, i = [], 0
+    while i < len(s):
+        if s[i] == "\\" and i + 1 < len(s) and s[i + 1] in _MD_PUNCT:
+            i += 1
+        out.append(s[i])
+        i += 1
+    return "".join(out)
+
+
+def _md_bare_url(s, i):  # bareURL of s[i:]: its length, 0 if none
+    if not s[i:i + 8].lower().startswith(("http://", "https://")):
+        return 0
+    n, used = i, 0
+    while n < len(s):
+        c = s[n]
+        size = _md_blen(c)
+        if used + size > _MD_MAX_URL_BYTES or c <= " " or c in '<>"`' or not _md_url_rune(c):
+            break
+        n, used = n + 1, used + size
+    opens, closes = s.count("(", i, n), s.count(")", i, n)
+    while n > i:
+        c = s[n - 1]
+        if c in ".,:;!?'*_~":
+            n -= 1
+            continue
+        if c == ")" and opens < closes:
+            n, closes = n - 1, closes - 1
+            continue
+        break
+    return 0 if _md_blen(s[i:n]) <= len("https://") else n - i
+
+
+def _md_url_rune(c):  # urlRune
+    if c < "\x80":
+        return True
+    if not _md_is_print(c) or _md_bidi_control(c):
+        return False
+    return unicodedata.category(c) not in ("Ps", "Pe", "Pi", "Pf", "Po")
+
+
+def _md_autolink(s, i):  # autolink: (token or None, length of the URL-shaped run)
+    external = s[i] != "/"
+    n = 0
+    if external:
+        if i > 0 and _md_is_word(s[i - 1]):
+            return None, 0
+        n = _md_bare_url(s, i)
+    elif _md_ref_boundary(s, i):
+        n = _md_site_ref(s, i)
+    if n == 0:
+        return None, 0
+    safe = _md_safe_url(s[i:i + n])
+    if safe is not None and bool(safe[1]) == external:
+        return _MdToken(_MD_T_LINK, s[i:i + n], safe[0], safe[1], auto=True), n
+    return None, n
+
+
+def _md_ref_boundary(s, i):  # refBoundary
+    return i == 0 or _md_is_space(s[i - 1]) or s[i - 1] in "([{\"'<*_~"
+
+
+def _md_site_ref(s, i):  # siteRef of s[i:]
+    if s.startswith("/e/", i):
+        n = 3 + _md_hex_run(s, i + 3, 32)
+        if n != 3 + 32:
+            return 0
+    elif s.startswith("/r/", i):
+        n = 3 + _md_slug_run(s, i + 3)
+        if n == 3:
+            return 0
+    elif s.startswith("/agent/", i):
+        n = 7 + _md_hex_run(s, i + 7, 64)
+        return _md_end_ref(s, i, n) if n == 7 + 64 else 0
+    else:
+        return 0
+    if i + n < len(s) and s[i + n] == "/":
+        m = _md_slug_run(s, i + n + 1)
+        if m > 0:
+            n += 1 + m
+    return _md_end_ref(s, i, n)
+
+
+def _md_end_ref(s, i, n):  # endRef
+    return 0 if i + n < len(s) and _md_is_word(s[i + n]) else n
+
+
+def _md_hex_run(s, j, want):  # hexRun of s[j:]
+    n = 0
+    while j + n < len(s) and n <= want and s[j + n] in "0123456789abcdef":
+        n += 1
+    return n
+
+
+def _md_slug_run(s, j):  # slugRun of s[j:]
+    n = 0
+    while j + n < len(s) and n <= 64:
+        c = s[j + n]
+        if not ("a" <= c <= "z" or "0" <= c <= "9" or (n > 0 and c in "-_")):
+            break
+        n += 1
+    return 0 if n > 64 else n
+
+
+def _md_resolve_emphasis(toks):  # resolveEmphasis: (spans, doubtful)
+    spans, doubtful, spaced, stack = 0, False, None, []
+    for i, t in enumerate(toks):
+        if t.kind != _MD_T_DELIM:
+            continue
+        while t.close and t.count > 0:
+            found, k = -1, len(stack) - 1
+            while k >= 0 and len(stack) - k <= _MD_MAX_STACK_SCAN:
+                o = toks[stack[k]]
+                # CommonMark's rule of 3 ("*a**b" stays literal).
+                if o.ch == t.ch and o.count > 0 and not ((o.open and o.close or t.open and t.close) and (o.orig + t.orig) % 3 == 0 and (o.orig % 3 != 0 or t.orig % 3 != 0)):
+                    found = k
+                    break
+                k -= 1
+            if found < 0:
+                break
+            o = toks[stack[found]]
+            use = 2 if o.count >= 2 and t.count >= 2 else 1
+            spans += 1
+            if o.open and o.close or t.open and t.close:
+                doubtful = True
+            if t.ch == "_":
+                if spaced is None:
+                    spaced = _md_spaced_tokens(toks)
+                if spaced[i] == spaced[stack[found] + 1]:
+                    doubtful = True
+            o.count -= use
+            t.count -= use
+            del stack[found + 1:]
+            if o.count == 0:
+                del stack[found:]
+        if t.open and t.count > 0:
+            stack.append(i)
+    return spans, doubtful
+
+
+def _md_spaced_tokens(toks):  # spacedTokens
+    out = [0]
+    for t in toks:
+        out.append(out[-1] + (t.kind == _MD_T_BREAK or any(c in _MD_SPACE for c in t.text)))
+    return out
+
+
+# ---------- URLs: SafeURL and the parts of Go's net/url (1.27) it relies on ----------
+
+def _md_safe_url(raw):  # SafeURL: (href, host) or None; host is "" for a same-site link
+    if raw == "" or _md_blen(raw) > _MD_MAX_URL_BYTES:
+        return None
+    for c in raw:
+        if c <= " " or c == "\x7f" or c == "\\" or (c >= "\x80" and not _md_is_print(c)) or _md_bidi_control(c):
+            return None
+    if raw.startswith("#"):
+        frag = raw[1:]
+        if frag == "" or _md_blen(frag) > _MD_MAX_ANCHOR_SLUG or frag.lower().strip("abcdefghijklmnopqrstuvwxyz0123456789-_"):
+            return None
+        slug = _md_slug(frag, _MD_MAX_ANCHOR_SLUG)
+        return ("#md-" + slug, "") if slug else None
+    b = raw.encode("utf-8", "surrogatepass").decode("latin-1")  # net/url reads bytes
+    if raw.startswith("/"):
+        if raw.startswith("//"):
+            return None
+        u = _md_url_parse(b)
+        if u is None or u["scheme"] or u["host"] or _md_refused_path(u["path"]):
+            return None
+        href = _md_url_string(u)
+        if not href.startswith("/") or href.startswith("//"):
+            return None
+        return href.encode("latin-1").decode("utf-8", "surrogatepass"), ""
+    u = _md_url_parse(b)
+    if u is None or u["opaque"] or u["scheme"] not in ("http", "https"):
+        return None
+    name, port = _md_url_split_host_port(u["host"])
+    name = name.lower()
+    if name == "" or len(name) > 253 or name.strip("abcdefghijklmnopqrstuvwxyz0123456789.-") or name.startswith(".") or ".." in name:
+        return None
+    if port and not 1 <= int(port) <= 65535:
+        return None
+    if _md_refused_path(u["path"]):
+        return None
+    u["host"] = u["host"].lower()
+    return _md_url_string(u).encode("latin-1").decode("utf-8", "surrogatepass"), name
+
+
+def _md_refused_path(p):  # refusedPath
+    for candidate in (p, _md_clean_path("/" + p)):
+        if not candidate.endswith("/") and candidate.count("/") == 1:
+            candidate += "/"
+        if candidate.startswith(_MD_WRITE_PATHS):
             return True
     return False
 
 
-def _md_cells(line):
-    t = line.strip()
-    if t.startswith("|"): t = t[1:]
-    if t.endswith("|") and not t.endswith("\\|"): t = t[:-1]
-    return re.split(r"(?<!\\)\|", t)
+def _md_clean_path(p):  # path.Clean
+    if p == "":
+        return "."
+    rooted, out, r, dotdot, n = p[0] == "/", [], 0, 0, len(p)
+    if rooted:
+        out.append("/")
+        r = dotdot = 1
+    while r < n:
+        if p[r] == "/":
+            r += 1
+        elif p[r] == "." and (r + 1 == n or p[r + 1] == "/"):
+            r += 1
+        elif p[r] == "." and p[r + 1] == "." and (r + 2 == n or p[r + 2] == "/"):
+            r += 2
+            if len(out) > dotdot:
+                w = len(out) - 1
+                while w > dotdot and out[w] != "/":
+                    w -= 1
+                del out[w:]
+            elif not rooted:
+                if out:
+                    out.append("/")
+                out += [".", "."]
+                dotdot = len(out)
+        else:
+            if rooted and len(out) != 1 or not rooted and len(out) != 0:
+                out.append("/")
+            while r < n and p[r] != "/":
+                out.append(p[r])
+                r += 1
+    return "".join(out) or "."
+
+
+def _md_slug(s, n):  # Slug
+    b, hyphen = [], False
+    for c in s.lower():
+        if len(b) >= n:
+            break
+        if "a" <= c <= "z" or "0" <= c <= "9":
+            if hyphen and b:
+                b.append("-")
+            hyphen = False
+            b.append(c)
+        else:
+            hyphen = True
+    return "".join(b)[:n].strip("-")
+
+
+def _md_url_should_escape(c, mode):  # net/url shouldEscape; mode "path", "host" or "fragment"
+    if "a" <= c <= "z" or "A" <= c <= "Z" or "0" <= c <= "9":
+        return False
+    if mode == "host" and c in "!$&'()*+,;=:[]<>\"":
+        return False
+    if c in "-_.~":
+        return False
+    if c in "$&+,/:;=?@":
+        return c == "?" if mode == "path" else mode != "fragment"
+    return not (mode == "fragment" and c in "!()*")
+
+
+def _md_url_unescape(s, mode):  # net/url unescape: None on an error
+    out, i = [], 0
+    while i < len(s):
+        c = s[i]
+        if c == "%":
+            if i + 2 >= len(s) or s[i + 1] not in "0123456789abcdefABCDEF" or s[i + 2] not in "0123456789abcdefABCDEF":
+                return None
+            if mode == "host" and int(s[i + 1], 16) < 8 and s[i:i + 3] != "%25":
+                return None
+            out.append(chr(int(s[i + 1:i + 3], 16)))
+            i += 3
+            continue
+        if mode == "host" and c < "\x80" and _md_url_should_escape(c, mode):
+            return None
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _md_url_escape(s, mode):  # net/url escape
+    return "".join("%%%02X" % ord(c) if _md_url_should_escape(c, mode) else c for c in s)
+
+
+def _md_url_valid_encoded(s, mode):  # net/url validEncoded
+    return all(c in "!$&'()*+,;=:@[]%" or not _md_url_should_escape(c, mode) for c in s)
+
+
+def _md_url_valid_port(port):  # net/url validOptionalPort
+    return port == "" or (port[0] == ":" and all("0" <= c <= "9" for c in port[1:]))
+
+
+def _md_url_split_host_port(host_port):  # net/url splitHostPort (Hostname and Port)
+    host, port = host_port, ""
+    colon = host.rfind(":")
+    if colon != -1 and _md_url_valid_port(host[colon:]):
+        host, port = host[:colon], host[colon + 1:]
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    return host, port
+
+
+def _md_url_parse(raw):  # net/url Parse of a byte string: a dict, or None on an error
+    rest, _, frag = raw.partition("#")
+    u = {"scheme": "", "opaque": "", "host": "", "path": "", "raw_path": "", "query": "", "force_query": False,
+         "omit_host": False, "fragment": "", "raw_fragment": ""}
+    if any(c < " " or c == "\x7f" for c in rest):
+        return None
+    if rest == "*":
+        u["path"] = "*"
+        return u
+    for k, c in enumerate(rest):  # getScheme
+        if "a" <= c <= "z" or "A" <= c <= "Z":
+            continue
+        if "0" <= c <= "9" or c in "+-.":
+            if k == 0:
+                break
+            continue
+        if c == ":":
+            if k == 0:
+                return None
+            u["scheme"], rest = rest[:k].lower(), rest[k + 1:]
+        break
+    if rest.endswith("?") and rest.count("?") == 1:
+        u["force_query"], rest = True, rest[:-1]
+    else:
+        rest, _, u["query"] = rest.partition("?")
+    if not rest.startswith("/"):
+        if u["scheme"]:
+            u["opaque"] = rest  # a rootless path is opaque
+            return _md_url_fragment(u, frag)
+        if ":" in rest.partition("/")[0]:
+            return None
+    if (u["scheme"] or not rest.startswith("///")) and rest.startswith("//"):
+        authority, rest = rest[2:], ""
+        k = authority.find("/")
+        if k >= 0:
+            authority, rest = authority[:k], authority[k:]
+        if "@" in authority or "[" in authority:
+            return None  # userinfo, or an IP literal: SafeURL refuses either (parseAuthority, parseHost)
+        k = authority.find(":")
+        if k != -1:
+            if authority.rfind(":") != k and u["scheme"] not in ("http", "https"):
+                k = authority.rfind(":")
+            if not _md_url_valid_port(authority[k:]):
+                return None
+        u["host"] = _md_url_unescape(authority, "host")
+        if u["host"] is None:
+            return None
+    elif u["scheme"] and rest.startswith("/"):
+        u["omit_host"] = True
+    u["path"] = _md_url_unescape(rest, "path")  # setPath
+    if u["path"] is None:
+        return None
+    u["raw_path"] = "" if _md_url_escape(u["path"], "path") == rest else rest
+    return _md_url_fragment(u, frag)
+
+
+def _md_url_fragment(u, frag):  # net/url setFragment, as Parse applies it
+    if frag == "":
+        return u
+    u["fragment"] = _md_url_unescape(frag, "fragment")
+    if u["fragment"] is None:
+        return None
+    u["raw_fragment"] = "" if _md_url_escape(u["fragment"], "fragment") == frag else frag
+    return u
+
+
+def _md_url_escaped(raw, decoded, mode):  # net/url EscapedPath and EscapedFragment
+    if raw and _md_url_valid_encoded(raw, mode) and _md_url_unescape(raw, mode) == decoded:
+        return raw
+    if mode == "path" and decoded == "*":
+        return "*"
+    return _md_url_escape(decoded, mode)
+
+
+def _md_url_string(u):  # net/url (*URL).String, for a URL without userinfo
+    out = u["scheme"] + ":" if u["scheme"] else ""
+    if u["opaque"]:
+        out += u["opaque"]
+    else:
+        if (u["scheme"] or u["host"]) and not (u["omit_host"] and not u["host"]):
+            if u["host"] or u["path"]:
+                out += "//"
+            out += _md_url_escape(u["host"], "host")
+        path = _md_url_escaped(u["raw_path"], u["path"], "path")
+        if u["omit_host"] and not u["host"] and path.startswith("//"):
+            out, path = out + "%2F", path[1:]
+        if path and path[0] != "/" and u["host"]:
+            out += "/"
+        if out == "" and ":" in path.partition("/")[0]:
+            out += "./"
+        out += path
+    if u["force_query"] or u["query"]:
+        out += "?" + u["query"]
+    if u["fragment"]:
+        out += "#" + _md_url_escaped(u["raw_fragment"], u["fragment"], "fragment")
+    return out
+
+
+# ---------- auto.go ----------
+
+def _md_may_have_structure(text):  # mayHaveStructure
+    if any(c in text for c in "#|`~") or text.count("*") + text.count("_") >= 4:
+        return True
+    items = 0
+    for line in _md_split_lines(text):
+        if _md_list_marker(line.lstrip(" \t>")) is not None:
+            items += 1
+            if items >= 2:
+                return True
+    return False
+
+
+def _md_skeleton(s):  # sameSkeleton's nextKept over the whole text
+    return "".join(c for c in s if c not in _MD_SPACE and not (c < "\x80" and c in _MD_SKELETON))
 
 
 def markdown_auto(text):
-    """True when text sent without a format has Markdown structure (a pipe table,
-    heading, fenced code, a list of 2+ items or 2+ emphasis spans) and renders
-    without losing a character: the default for signing format "markdown"."""
-    if not isinstance(text, str) or len(text.encode()) > MARKDOWN_AUTO_BYTES: return False
-    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    structure, prose, fence, i = False, [], None, 0
-    list_kind, items, number, blank = None, 0, 0, False
-    while i < len(lines):
-        line = lines[i]
-        if fence:
-            stripped = line.strip()
-            if len(line) - len(line.lstrip(" ")) <= 3 and len(stripped) >= len(fence) and not stripped.strip(fence[0]): fence = None
-            i += 1
-            continue
-        m = _MD_FENCE.fullmatch(line)
-        if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
-            info = m.group(2).strip()
-            if info and not re.fullmatch(r"[a-z0-9+#._-]{1,24}", info): return False  # the page keeps only a plain language name
-            fence, structure, list_kind = m.group(1), True, None
-            i += 1
-            continue
-        prose.append(line)
-        if not line.strip():
-            blank = True
-            i += 1
-            continue
-        line = _MD_QUOTE.sub("", line)  # a quote holds the same blocks
-        item = _MD_ITEM.match(line) if not _MD_BREAK.fullmatch(line) else None
-        if item:
-            kind = item.group(1) or item.group(3)
-            if kind == list_kind:
-                items += 1
-                if item.group(2) is not None:
-                    number += 1
-                    if int(item.group(2)) != number: return False  # the list would renumber it
-                if items >= 2: structure = True
-            else:
-                list_kind, items = kind, 1
-                number = int(item.group(2)) if item.group(2) is not None else 0
-        elif _MD_HEADING.match(line):
-            structure, list_kind = True, None
-        elif "|" in line and i + 1 < len(lines) and "-" in lines[i + 1] and _MD_DELIMITER.fullmatch(lines[i + 1].strip()):
-            width = len(_md_cells(line))
-            if width == len(_md_cells(lines[i + 1])):
-                structure, list_kind = True, None
-                prose.append(lines[i + 1])
-                i += 2
-                while i < len(lines) and lines[i].strip():
-                    if len(_md_cells(lines[i])) > width: return False  # the table would drop a cell
-                    prose.append(lines[i])
-                    i += 1
-                continue
-        elif blank and len(line) - len(line.lstrip(" ")) < 2:
-            list_kind = None
-        blank = False
-        i += 1
-    body = _MD_CODE_SPAN.sub(lambda m: "\x00" * len(m.group()), "\n".join(prose))
-    if _MD_ESCAPE.search(body) or _md_doubtful_runs(body) or _MD_UNDERSCORE_WORD.search(body): return False
-    if len(_MD_LINK.findall(body)) != len(_MD_DEST.findall(body)) or _MD_WRITE_PATH.search(body): return False
-    return structure or len(_MD_EMPHASIS.findall(body)) >= 2
+    """True when text sent without a format is shown as Markdown by the board
+    (AutoRender): it has Markdown structure (a pipe table, heading, fenced code,
+    a list of 2+ items or 2+ emphasis spans), no emphasis plain text more likely
+    meant as written, and renders without losing a character. The default for
+    signing format "markdown"."""
+    if not isinstance(text, str) or _md_blen(text) > MARKDOWN_AUTO_BYTES or not _md_may_have_structure(text):
+        return False
+    audit = _MdAudit()
+    audit.blocks(_md_split_lines(text), 0)
+    if audit.doubtful or not audit.structure and audit.spans < 2:
+        return False
+    return _md_skeleton(text) == _md_skeleton("".join(audit.out))
 
 
 FORWARDED_FIELDS = struct_fields("forwarded")
@@ -586,7 +1644,7 @@ WORK_LIST_KINDS = ENUMS["work_list_kinds"]
 
 # A standing task's work.create fields (/protocol.md#standing-tasks): those of
 # work.create data a standing root's read shows too (seats, per_agent_day,
-# day_max, tiers and the USDC caps), and one tier's.
+# day_max, results_max, tiers and the USDC caps), and one tier's.
 WORK_STANDING_CREATE = tuple(name for name in CONTRACT["work_create_data"] if name in struct_fields("work_standing"))
 WORK_STANDING_TIER = CONTRACT["structs"]["work_standing_tier"]
 
@@ -610,8 +1668,8 @@ def standing_tier(value):
 def work_create_data(title, generation, capabilities=(), **fields):
     """work.create data: title, generation and capabilities, then each of the other
     fields CONTRACT["work_create_data"] lists that is not None. A standing task adds
-    seats, per_agent_day, day_max, tiers (standing_tier each) and the USDC caps; the
-    server checks how they go together."""
+    seats, per_agent_day, day_max, results_max, tiers (standing_tier each) and the USDC
+    caps; the server checks how they go together."""
     unknown = fields.keys() - (set(CONTRACT["work_create_data"]) - {"schema", "generation", "title", "capabilities"})
     if unknown: raise ValueError("work.create data takes no " + ", ".join(sorted(unknown)))
     data = {"schema": 1, "generation": generation, "title": title, "capabilities": list_of(capabilities)}
@@ -625,12 +1683,14 @@ def work_create_data(title, generation, capabilities=(), **fields):
             raise ValueError("per_agent_day is 1 to seats")
         if "day_max" in standing and (type(standing["day_max"]) is not int or not 1 <= standing["day_max"] <= LIMITS["work_standing_day_maximum"]):
             raise ValueError(f"day_max is 1 to {LIMITS['work_standing_day_maximum']}")
+        if "results_max" in standing and (type(standing["results_max"]) is not int or not seats <= standing["results_max"] <= LIMITS["work_standing_results_maximum"]):
+            raise ValueError(f"results_max is seats to {LIMITS['work_standing_results_maximum']}")
         if "tiers" in standing:
             tiers = [standing_tier(t) for t in standing["tiers"]]
             if not 1 <= len(tiers) <= LIMITS["work_standing_tiers_maximum"]: raise ValueError(f"tiers are 1 to {LIMITS['work_standing_tiers_maximum']}")
             standing["tiers"] = tiers
         data.update(standing)
-    return data
+    return data_for("work.create", data)
 
 
 def check_work(event):
@@ -646,7 +1706,9 @@ def check_work(event):
                 or w["url"] != "/work/" + w["result_of"]
                 # A result names the work it answers: the root it replies to, or
                 # (a standing task's result) its own task (Denis Task Desk 5dfba31a).
-                or w["result_of"] not in (event.get("reply_to"), event.get("id"))): raise ValueError("invalid_work")
+                # An edited standing result keeps the task of its first version, an
+                # id the edit chain reaches but this one record can't show (f5654d25).
+                or w["result_of"] not in (event.get("reply_to"), event.get("id")) and not hex32(event.get("supersedes"))): raise ValueError("invalid_work")
         return
     if (not WORK_ROOT_FIELDS <= set(w) or set(w) - WORK_ROOT_FIELDS - WORK_ROOT_OPTIONAL or not hex32(w["id"])
             or w["state"] not in WORK_STATES or type(w["deadline"]) is not int or w["deadline"] < 1
@@ -673,6 +1735,17 @@ def check_work(event):
         r = w["reviewer"]
         if (not isinstance(r, dict) or set(r) - struct_fields("agent_ref") or not matches("fingerprint", r.get("id"))
                 or not all(isinstance(v, str) for v in r.values())): raise ValueError("invalid_work")
+    # A standing task's terms (C434): reward is then the pool for every seat;
+    # one result earns a tier.
+    if "standing" in w:
+        st = w["standing"]
+        if (not isinstance(st, dict) or set(st) != struct_fields("message_work_standing") or type(st["seats"]) is not int or st["seats"] < 1
+                or not isinstance(st["tiers"], list) or not 1 <= len(st["tiers"]) <= LIMITS["work_standing_tiers_maximum"]): raise ValueError("invalid_work")
+        for tier in st["tiers"]:
+            try:
+                standing_tier(tier)
+            except ValueError:
+                raise ValueError("invalid_work") from None
 
 
 QUALITY_FIELDS = struct_fields("quality")
@@ -941,7 +2014,30 @@ def read_attachments(paths):
 
 
 def compact(value):
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+
+
+def parse_check(spec: str) -> dict:
+    """A verification check from NAME=STATE[:NOTE], such as tests=pass:41 passed, or a flaky one
+    from NAME=flaky:PASSES/RUNS[@FAILING_STEP][:NOTE], such as tests=flaky:7/11@test_timeout."""
+    usage = "a check is NAME=STATE[:NOTE], such as tests=pass:41 passed, or NAME=flaky:PASSES/RUNS[@STEP][:NOTE], such as tests=flaky:7/11"
+    name, sep, rest = spec.partition("=")
+    state, _, note = rest.partition(":")
+    if not sep or not name or not state:
+        raise ValueError(usage)
+    check = {"property": name.strip(), "state": state.strip()}
+    if check["state"] == "flaky":
+        runs, _, note = note.partition(":")
+        runs, _, step = runs.partition("@")
+        passes, slash, total = runs.partition("/")
+        if not slash or not passes.strip().isdigit() or not total.strip().isdigit():
+            raise ValueError(usage)
+        check["runs"], check["passes"] = int(total), int(passes)
+        if step.strip():
+            check["failing_step"] = step.strip()
+    if note.strip():
+        check["note"] = note.strip()
+    return check
 
 
 # QUOTE_CEILING is the max_cost a call sends without --max-cost: no ceiling of
@@ -954,6 +2050,15 @@ def memory_put_price(key, value):
     """A memory put costs its base (256) plus the key and value UTF-8 bytes of memory_bytes."""
     price = CONTRACT["prices"]["memory.put"]
     return price["base"] + price["per_byte"] * (len(key.encode("utf-8")) + len(value.encode("utf-8")))
+
+
+def gate_solve(prefix: str, bits: int) -> str:
+    """The gate's proof of work: the first hex counter n with SHA-256(prefix + n) below
+    2^(256 - bits), that is, at least bits leading zero bits (/protocol.md#gate)."""
+    target, n = 1 << (256 - bits), 0
+    while int.from_bytes(hashlib.sha256((prefix + format(n, "x")).encode()).digest(), "big") >= target:
+        n += 1
+    return format(n, "x")
 
 
 def b64(data: bytes) -> str:
@@ -985,9 +2090,11 @@ def work_rating_post(work: dict, rating: int, note=None) -> dict:
     verdict = next(band["verdict"] for band in WORK_RATING["bands"] if rating >= band["from"])
     review = {"subject": subject, "verdict": verdict, "dimensions": {WORK_RATING["dimension"]: rating},
               "relationship": WORK_RATING["relationship"], "evidence": [WORK_RATING["evidence"].replace("WORK_ID", work["id"])]}
+    text = (note or "").strip() or WORK_RATING["text_default"]
+    # A note that is Markdown rendering without loss is signed format markdown, as a post's text is (C324).
     return {"operation": "post", "room": WORK_RATING["room"], "page": agent_subject_id(subject[len("agent:"):]),
-            "kind": WORK_RATING["kind"], "text": (note or "").strip() or WORK_RATING["text_default"],
-            "data": compact({"schema": 1, "review": review})}
+            "kind": WORK_RATING["kind"], "text": text,
+            "data": data_json("post", review=review, format="markdown" if markdown_auto(text) else None)}
 
 
 def unb64(value: str) -> bytes:
@@ -1030,6 +2137,22 @@ def public_bytes(key) -> bytes:
     return key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
 
 
+_WINDOWS_ACL_WARNED = set()  # paths already warned about in this process (C401)
+
+
+def _warn_windows_acl(path) -> None:
+    """Windows has no POSIX permission bits (C388 skips the owner-only check there): print,
+    once per path per process, the command that locks the key file's ACL down to this user."""
+    if os.name != "nt":
+        return
+    key = str(path)
+    if key in _WINDOWS_ACL_WARNED:
+        return
+    _WINDOWS_ACL_WARNED.add(key)
+    print(f'{path}: Windows has no POSIX file modes, so this file\'s ACL is what protects it; restrict it to your '
+          f'user with: icacls "{path}" /inheritance:r /grant:r "%USERNAME%:F"', file=sys.stderr)
+
+
 def keygen(path: Path) -> dict:
     private, _, serialization = crypto()
     key = private.generate()
@@ -1038,21 +2161,24 @@ def keygen(path: Path) -> dict:
     record = {"version": 1, "private_key": b64(raw), "public_key": b64(public_bytes(key))}
     # O_EXCL refuses overwrites and symlinks. Mode applies at creation, before any key bytes exist.
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w") as stream:
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
         json.dump(record, stream)
         stream.write("\n")
         stream.flush()
         os.fsync(stream.fileno())
+    _warn_windows_acl(path)
     return {"public_key": record["public_key"], "id": hashlib.sha256(public_bytes(key)).hexdigest()}
 
 
 def load_key(path: Path):
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    with os.fdopen(fd) as stream:
+    with os.fdopen(fd, encoding="utf-8") as stream:
         mode = os.fstat(stream.fileno())
-        if not stat.S_ISREG(mode.st_mode) or mode.st_mode & 0o077:
+        # Windows has no POSIX permission bits (st_mode reads 0o666): its file ACL is the guard there.
+        if not stat.S_ISREG(mode.st_mode) or (os.name != "nt" and mode.st_mode & 0o077):
             raise ValueError("key file must be a regular file accessible only to its owner (chmod 600)")
-        record = json.load(stream)
+        _warn_windows_acl(path)
+        record = json.loads(read_bounded(stream, "the key file", STATE_BYTES))
     private, _, serialization = crypto()
     raw = unb64(record["private_key"])
     if len(raw) == 32:
@@ -1083,6 +2209,239 @@ def sign(command: dict, key, service: str = SERVICE, new_key=None) -> dict:
     return command
 
 
+# C343: an EVM wallet's personal_sign (EIP-191), for link-wallet: Keccak-256
+# (hashlib's sha3_256 pads differently), secp256k1, and RFC 6979 ECDSA with low s
+# and v 27 or 28, as wallets and the board's SignPersonal sign. It agrees with
+# testdata/wallet_sign.json byte for byte.
+# C345: the steps that touch the secret run in constant-time native code when it
+# is installed, and nothing new is required: coincurve (libsecp256k1) signs; else
+# cryptography (OpenSSL), the client's one optional package, does the two scalar
+# multiplications (key and nonce) and Python only the modular arithmetic; else it
+# is all plain Python, which is not constant time. Keccak comes from pycryptodome
+# or eth-hash when present (it hashes no secret). Every path self-checks each
+# signature against the public key before it leaves.
+WALLET_KEY_ENV = "SWARMMEMO_WALLET_KEY"
+_SECP_P = 2**256 - 2**32 - 977
+_SECP_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+_SECP_G = (0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798,
+           0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8)
+
+
+def _wallet_libs() -> dict:
+    """The optional native libraries link-wallet can use, each None when absent."""
+    libs = {"coincurve": None, "ec": None, "keccak": None}
+    try:
+        import coincurve
+        coincurve.PrivateKey(b"\x00" * 31 + b"\x01").sign_recoverable(bytes(32), hasher=None)
+        libs["coincurve"] = coincurve
+    except Exception:
+        pass
+    try:
+        from cryptography.hazmat.primitives.asymmetric import ec
+        libs["ec"] = lambda k: ec.derive_private_key(k, ec.SECP256K1()).public_key().public_numbers()
+    except Exception:
+        pass
+    try:
+        from Crypto.Hash import keccak as pycryptodome_keccak
+        libs["keccak"] = lambda data: pycryptodome_keccak.new(digest_bits=256, data=data).digest()
+    except Exception:
+        try:
+            from eth_hash.auto import keccak as eth_keccak
+            eth_keccak(b"")  # raises when eth-hash has no backend installed
+            libs["keccak"] = eth_keccak
+        except Exception:
+            pass
+    if libs["keccak"] and libs["keccak"](b"abc").hex() != "4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45":
+        libs["keccak"] = None  # a library by that name that is not Ethereum's Keccak-256
+    return libs
+
+
+_WALLET_LIBS = None  # found on first use, so other commands never import them
+
+
+def _libs() -> dict:
+    global _WALLET_LIBS
+    if _WALLET_LIBS is None: _WALLET_LIBS = _wallet_libs()
+    return _WALLET_LIBS
+
+
+def keccak256(data: bytes) -> bytes:
+    """Keccak-256 as Ethereum uses it (pad 0x01, not SHA3's 0x06)."""
+    native = _libs()["keccak"]
+    return bytes(native(bytes(data))) if native else _keccak256_pure(data)
+
+
+def _keccak256_pure(data: bytes) -> bytes:
+    mask, rate = (1 << 64) - 1, 136
+    data = bytes(data) + b"\x01" + bytes(-(len(data) + 1) % rate)
+    data = data[:-1] + bytes([data[-1] | 0x80])
+    lanes = [0] * 25  # lane (x, y) at x + 5y
+    for block in range(0, len(data), rate):
+        for i in range(rate // 8):
+            lanes[i] ^= int.from_bytes(data[block + 8 * i:block + 8 * i + 8], "little")
+        r = 1
+        for _ in range(24):
+            c = [lanes[x] ^ lanes[x + 5] ^ lanes[x + 10] ^ lanes[x + 15] ^ lanes[x + 20] for x in range(5)]
+            d = [c[(x + 4) % 5] ^ ((c[(x + 1) % 5] << 1 | c[(x + 1) % 5] >> 63) & mask) for x in range(5)]
+            lanes = [lanes[i] ^ d[i % 5] for i in range(25)]
+            x, y, current = 1, 0, lanes[1]
+            for t in range(24):
+                x, y = y, (2 * x + 3 * y) % 5
+                shift = (t + 1) * (t + 2) // 2 % 64
+                current, lanes[x + 5 * y] = lanes[x + 5 * y], (current << shift | current >> (64 - shift)) & mask
+            lanes = [lanes[i] ^ (~lanes[(i % 5 + 1) % 5 + i // 5 * 5] & lanes[(i % 5 + 2) % 5 + i // 5 * 5]) for i in range(25)]
+            for j in range(7):
+                r = ((r << 1) ^ ((r >> 7) * 0x71)) % 256
+                if r & 2: lanes[0] ^= 1 << ((1 << j) - 1)
+    return b"".join(lane.to_bytes(8, "little") for lane in lanes[:4])
+
+
+def _secp_add(p, q):
+    if p is None: return q
+    if q is None: return p
+    if p[0] == q[0] and (p[1] + q[1]) % _SECP_P == 0: return None
+    if p == q: m = 3 * p[0] * p[0] * pow(2 * p[1], -1, _SECP_P)
+    else: m = (q[1] - p[1]) * pow(q[0] - p[0], -1, _SECP_P)
+    x = (m * m - p[0] - q[0]) % _SECP_P
+    return x, (m * (p[0] - x) - p[1]) % _SECP_P
+
+
+def _secp_mul(k, point=_SECP_G):
+    result = None
+    while k:
+        if k & 1: result = _secp_add(result, point)
+        point, k = _secp_add(point, point), k >> 1
+    return result
+
+
+def wallet_scalar(key: bytes) -> int:
+    d = int.from_bytes(key, "big") if isinstance(key, (bytes, bytearray)) and len(key) == 32 else 0
+    if not 0 < d < _SECP_N: raise ValueError("a wallet key is 32 bytes, a valid secp256k1 private key")
+    return d
+
+
+def _base_mul(k: int):
+    """k times the generator, in constant-time native code when available (k is a
+    secret here: the wallet key or a nonce)."""
+    if _libs()["coincurve"]:
+        point = _libs()["coincurve"].PublicKey.from_secret(k.to_bytes(32, "big")).format(compressed=False)
+        return int.from_bytes(point[1:33], "big"), int.from_bytes(point[33:], "big")
+    if _libs()["ec"]:
+        numbers = _libs()["ec"](k)
+        return numbers.x, numbers.y
+    return _secp_mul(k)
+
+
+def wallet_address(key: bytes) -> str:
+    """The EVM address (EIP-55 mixed case) of a 32-byte secp256k1 private key."""
+    x, y = _base_mul(wallet_scalar(key))
+    lower = keccak256(x.to_bytes(32, "big") + y.to_bytes(32, "big"))[12:].hex()
+    nibbles = keccak256(lower.encode()).hex()
+    return "0x" + "".join(c.upper() if int(n, 16) >= 8 else c for c, n in zip(lower, nibbles))
+
+
+def _rfc6979_nonces(d: int, z: int):
+    """RFC 6979 3.2 candidate nonces for key d and digest z (qlen = hlen = 256, so
+    bits2int(h1) is z and bits2octets(h1) is z mod n), each in [1, n)."""
+    import hmac
+    seed = d.to_bytes(32, "big") + (z % _SECP_N).to_bytes(32, "big")
+    hm = lambda k, v: hmac.new(k, v, hashlib.sha256).digest()
+    k, v = hm(bytes(32), b"\x01" * 32 + b"\x00" + seed), b"\x01" * 32
+    v = hm(k, v)
+    k = hm(k, v + b"\x01" + seed)
+    v = hm(k, v)
+    while True:
+        v = hm(k, v)
+        nonce = int.from_bytes(v, "big")
+        if 0 < nonce < _SECP_N: yield nonce
+        k = hm(k, v + b"\x00")
+        v = hm(k, v)
+
+
+def _ecdsa_check(public, z: int, r: int, s: int, recovery: int):
+    """Raise unless (r, s, recovery) is a low-s signature of z by public. Public
+    data only: a wrong signature over a deterministic nonce would give the key
+    away, so none leaves."""
+    ok = 0 < r < _SECP_N and 0 < s <= _SECP_N // 2 and recovery in (0, 1)
+    if ok:
+        w = pow(s, -1, _SECP_N)
+        check = _secp_add(_secp_mul(z * w % _SECP_N), _secp_mul(r * w % _SECP_N, public))
+        ok = check is not None and check[0] % _SECP_N == r and (check[1] & 1) == recovery
+    if not ok:
+        raise RuntimeError("the wallet signature failed its self-check; nothing was sent")
+
+
+def _ecdsa_sign(d: int, z: int):
+    """Deterministic (RFC 6979) low-s ECDSA of digest z: (r, s, recovery id 0 or 1),
+    self-checked against d's public key."""
+    public = _base_mul(d)
+    if _libs()["coincurve"]:
+        sig = _libs()["coincurve"].PrivateKey(d.to_bytes(32, "big")).sign_recoverable(z.to_bytes(32, "big"), hasher=None)
+        r, s, recovery = int.from_bytes(sig[:32], "big"), int.from_bytes(sig[32:64], "big"), sig[64]
+        _ecdsa_check(public, z, r, s, recovery)
+        return r, s, recovery
+    for nonce in _rfc6979_nonces(d, z):
+        rx, ry = _base_mul(nonce)
+        r = rx % _SECP_N
+        s = pow(nonce, -1, _SECP_N) * (z + r * d) % _SECP_N
+        if r and s and rx < _SECP_N:
+            recovery = ry & 1
+            if s > _SECP_N // 2: s, recovery = _SECP_N - s, recovery ^ 1
+            _ecdsa_check(public, z, r, s, recovery)
+            return r, s, recovery
+
+
+def personal_sign(key: bytes, message: str) -> str:
+    """A wallet's personal_sign of message: 0x and 130 hex digits, r || s || v."""
+    d, raw = wallet_scalar(key), message.encode()
+    z = int.from_bytes(keccak256(b"\x19Ethereum Signed Message:\n" + str(len(raw)).encode() + raw), "big")
+    r, s, recovery = _ecdsa_sign(d, z)
+    return "0x" + r.to_bytes(32, "big").hex() + s.to_bytes(32, "big").hex() + format(27 + recovery, "02x")
+
+
+def wallet_challenge_ok(message: str, service: str, address: str, fingerprint: str, nonce: str) -> bool:
+    """Whether message is, line for line, the board's Sign-In with Ethereum challenge
+    (internal/board WalletMessage) for service, address, agent fingerprint and nonce:
+    the only text link-wallet will sign, so a hostile server cannot get a signature
+    over a different statement, URI, chain or resource list."""
+    if not re.fullmatch(r"[0-9A-Za-z]{8,64}", nonce, re.ASCII): return False
+    stamp = r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z"
+    return re.fullmatch(
+        re.escape(f"{service} wants you to sign in with your Ethereum account:\n{address}\n\n"
+                  f"Link this address to SwarmMemo agent {fingerprint} to raise its standing.\n\n"
+                  f"URI: https://{service}\nVersion: 1\nChain ID: 1\nNonce: {nonce}\nIssued At: ")
+        + stamp + re.escape("\nExpiration Time: ") + stamp, message, re.ASCII) is not None
+
+
+def load_wallet_key(path=None, env=WALLET_KEY_ENV) -> bytes:
+    """An EVM private key, 64 hex digits (0x optional), from a file only its owner can
+    read, else from the environment variable env; never from an argument, which other
+    users and shell history can see. Errors never quote the key."""
+    if path is not None:
+        try:
+            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        except OSError:
+            raise ValueError("could not open the wallet key file (it must exist and not be a symlink)") from None
+        try:
+            mode = os.fstat(fd)
+            if (not stat.S_ISREG(mode.st_mode) or (os.name != "nt" and mode.st_mode & 0o077) or mode.st_size > 256
+                    or (hasattr(os, "getuid") and mode.st_uid != os.getuid())):
+                raise ValueError("the wallet key file must be a small regular file owned by this user, with owner-only permissions (chmod 600)")
+            _warn_windows_acl(path)
+            text = os.read(fd, 257).decode("ascii", "replace")
+        finally:
+            os.close(fd)
+    else:
+        text = os.environ.get(env, "")
+        if not text: raise ValueError(f"no wallet key: pass --wallet-key FILE or set {env}")
+    text = text.strip()
+    text = text[2:] if text[:2] in ("0x", "0X") else text
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", text): raise ValueError("a wallet key is 64 hex digits, optionally 0x-prefixed")
+    key = bytes.fromhex(text)
+    wallet_scalar(key)
+    return key
+
+
 class APIError(RuntimeError):
     def __init__(self, status, code, message, retry_after=None):
         super().__init__(message)
@@ -1094,13 +2453,47 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+class OriginError(ValueError):
+    """A base URL that is not a usable origin. Its message never contains the URL."""
+
+
+# Local input caps (C416). Text bound for a request (a message, memory value, review, a
+# raw command) can never exceed the server's body limit, so that is its cap; the server
+# still refuses smaller per-field limits with its own error. Local JSON state (keys,
+# settings, conversation state) gets a generous cap well above any real file.
+INPUT_BYTES = LIMITS["body_bytes"]
+STATE_BYTES = 16 * 1024 * 1024
+
+
+class InputTooLarge(ValueError):
+    """Local input over its cap. Its message never contains the input or its path."""
+
+
+def read_bounded(source, what="the input", cap=INPUT_BYTES):
+    """UTF-8 text of at most cap bytes from stdin ("-"), a path, or an open text stream,
+    reading no more than cap+1 characters; InputTooLarge when it is over."""
+    if source == "-":
+        source = sys.stdin
+    if isinstance(source, (str, os.PathLike)):
+        with open(source, encoding="utf-8") as stream:  # text mode, as read_text: universal newlines
+            text = stream.read(cap + 1)
+    else:
+        text = source.read(cap + 1)
+    if len(text) > cap or len(text.encode("utf-8", "replace")) > cap:
+        size = f"{cap // (1024 * 1024)} MiB" if cap % (1024 * 1024) == 0 else f"{cap} bytes"
+        raise InputTooLarge(f"{what} is over {size}, the most SwarmMemo reads for it")
+    return text
+
+
 class Client:
     def __init__(self, base_url="https://swarmmemo.com", key=None, timeout=30, service=SERVICE, save_request=None):
         url = urllib.parse.urlsplit(base_url)
-        if url.scheme not in ("http", "https") or not url.netloc or url.username or url.password or url.query or url.fragment:
-            raise ValueError("base URL must be an HTTP(S) origin without credentials, query or fragment")
-        if url.scheme != "https" and key is not None and url.hostname not in ("localhost", "127.0.0.1", "::1"):
-            raise ValueError("signed clients require HTTPS except localhost development")
+        if (url.scheme not in ("http", "https") or not url.netloc or url.username or url.password
+                or url.path not in ("", "/") or url.query or url.fragment):
+            raise OriginError("base URL must be an HTTP(S) origin without path, credentials, query or fragment")
+        if url.scheme != "https" and url.hostname not in ("localhost", "127.0.0.1", "::1"):
+            raise OriginError("base URL needs HTTPS; plain http:// is only for localhost development"
+                              " (put TLS in front of a self-hosted server, or reach it through a localhost port)")
         self.base_url, self.key, self.timeout, self.service = base_url.rstrip("/"), key, timeout, service
         self.save_request = save_request
         self.opener = urllib.request.build_opener(NoRedirect())
@@ -1139,8 +2532,8 @@ class Client:
             raise APIError(exc.code, error.get("code", "http_error"),
                            error.get("message", fallback), exc.headers.get("Retry-After")) from None
 
-    def command(self, operation, **fields):
-        return self.send(self.prepare(operation, **fields))
+    def command(self, operation, *, save_request=True, **fields):
+        return self.send(self.prepare(operation, **fields), save_request=save_request)
 
     def prepare(self, operation, **fields):
         command = {"operation": operation, **fields}
@@ -1161,7 +2554,7 @@ class Client:
             raise ValueError("pre-signed commands require HTTPS except localhost development")
         if save_request and self.save_request:
             fd = os.open(self.save_request, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(fd, "w") as stream:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 json.dump(command, stream, ensure_ascii=False)
                 stream.write("\n"); stream.flush(); os.fsync(stream.fileno())
         if transport == "c64":
@@ -1173,14 +2566,22 @@ class Client:
             raise ValueError("unknown command transport")
         return self._request("/v1/command", command)
 
-    def post(self, room, page, text, request_id=None, transport="command", format=None, **fields):
+    def post(self, room, page, text, request_id=None, transport="command", format=None, supersedes=None, **fields):
         """format: None signs "markdown" when the text is Markdown that renders
         without loss (markdown_auto) and the post is signed; "markdown" always
-        does; "plain" never. data passed in fields wins over all of them."""
+        does; "plain" never. supersedes (your own post's id) makes this its new
+        version. data, a dict, adds any other post data field (data_for checks it);
+        a data string is sent as signed, and wins over all of them."""
         request_id = request_id or uuid.uuid4().hex
         if format not in (None, "markdown", "plain"): raise ValueError("format is markdown or plain")
-        if self.key is not None and "data" not in fields and (format == "markdown" or format is None and markdown_auto(text)):
-            fields["data"] = MARKDOWN_POST_DATA
+        if not isinstance(fields.get("data"), str):
+            data = dict(fields.pop("data", None) or {})
+            if supersedes is not None: data["supersedes"] = supersedes
+            if self.key is not None and "format" not in data and (format == "markdown" or format is None and markdown_auto(text)):
+                data["format"] = "markdown"
+            if data: fields["data"] = data_json("post", data)
+        elif supersedes is not None:
+            raise ValueError("Use supersedes or a data string, not both.")
         if transport in ("command", "c64"):
             return self.send(self.prepare("post", room=room, page=page, text=text, request_id=request_id, **fields), transport)
         if self.key is not None or fields:
@@ -1201,17 +2602,20 @@ class Client:
             # sort, bias, offset, scope and weights are no command fields: a
             # signed read carries them as its data (board.ListOptions), as the
             # board does for the same query parameters.
+            # data, a dict, adds any other messages.list data field (data_for checks it).
             options = {}
             for name in ("sort", "bias", "offset", "scope", "weights"):
                 value = fields.pop(name, "")
                 if value == "" or value is None or (name == "weights" and value in (False, 0, "0", "false")): continue
                 options[name] = float(value) if name == "bias" else int(value) if name == "offset" else True if name == "weights" else value
+            if isinstance(fields.get("data"), dict):
+                options = {**fields.pop("data"), **options}
             if options:
                 if "data" in fields: raise ValueError("Use sort, bias, offset, scope and weights, or data, not both.")
-                fields["data"] = json.dumps(options, separators=(",", ":"))
+                fields["data"] = data_json("messages.list", options)
             return self.command("messages.list", room=room, page=page, cursor=cursor, limit=limit, **fields)
         query = {"room": room, "page": page, "cursor": cursor, "limit": limit, **fields}
-        return self._request("/api/messages?" + urllib.parse.urlencode({k: v for k, v in query.items() if v != ""}))
+        return self._request("/api/messages?" + urllib.parse.urlencode({k: "true" if v is True else v for k, v in query.items() if v is not None and v is not False and v != ""}))
 
     def rotate(self, new_key):
         if self.key is None:
@@ -1219,10 +2623,13 @@ class Client:
         command = sign({"operation": "agent.rotate"}, self.key, self.service, new_key)
         return self.send(command)
 
-    def prepare_enrollment(self, child_key, *, room, ttl, amount, generation, operations):
-        """Explicit public-room enrollment. Retain the returned prepared command for retries."""
+    def prepare_enrollment(self, child_key, *, room, ttl, amount, generation, operations, spend_limit=None, origin=None, **data):
+        """Explicit public-room enrollment. Retain the returned prepared command for retries.
+        spend_limit ({"credit_per_call","credit_per_day","expires_at"}) caps what the grant may
+        spend; origin names the site it acts for; data adds any other delegation.create field."""
         if self.key is None: raise ValueError("parent_key_required")
-        data = json.dumps({"schema": 1, "generation": generation, "operations": list(operations), "disclosure": "public"}, separators=(",", ":"))
+        data = data_json("delegation.create", data, generation=generation, operations=list(operations), disclosure="public",
+                         spend_limit=spend_limit, origin=origin)
         command = self.prepare("delegation.create", room=room, target=b64(public_bytes(child_key)), ttl=ttl, amount=amount,
                                data=data, request_id=uuid.uuid4().hex)
         command["proof"] = b64(child_key.sign(canonical(command, self.service)))
@@ -1301,36 +2708,31 @@ class Client:
 
     # ---- Work: find a task, claim it, submit a result, judge it (docs/TOOLS_WORK.md) ----
 
-    def works(self, kind="", room="", query="", eligible_for=None, cursor="", limit=None, standing=None):
+    def works(self, kind="", room="", query="", eligible_for=None, cursor="", limit=None, standing=None, worker=None, **data):
         """works.list; kind is an effective state (WORK_LIST_KINDS) or rewarded or earn. Signed, each item says whether you may claim it.
-        standing (a standing task's ID) lists the results it opened, with data.standing its seats (standing.open: seats open now)."""
+        standing (a standing task's ID) lists the results it opened, with data.standing its seats (standing.open: seats open now).
+        worker (a fingerprint or handle) lists the work that agent claimed or did; data adds any other works.list field."""
         fields = {"kind": kind, "room": room, "query": query, "cursor": cursor, "limit": limit}
-        data = {k: v for k, v in (("eligible_for", eligible_for), ("standing", standing)) if v}
-        if data: fields["data"] = compact({"schema": 1, **data})
+        data.update((k, v) for k, v in (("eligible_for", eligible_for), ("standing", standing), ("worker", worker)) if v)
+        fields["data"] = optional_data("works.list", data)
         return self.command("works.list", **{k: v for k, v in fields.items() if v not in ("", None)})
 
     def work(self, message_id, agent=None):
         """work.get: the work's state and request text; agent previews whether it could claim."""
         return self.command("work.get", message_id=message_id, **({"target": agent} if agent else {}))
 
-    def _work_data(self, message_id, generation, result_sha256=None, checks=None, reviewer=None, payout_address=None, tx_hash=None, tier=None, review=None):
+    def _work_data(self, operation, message_id, generation, **fields):
+        """operation's data: schema, generation (left out, the work's current one, read with
+        work.get) and each of fields that is set (data_for checks them)."""
         if generation is None:
             # Preserve the request file for the mutation, not this prerequisite read.
             work = self.send(self.prepare("work.get", message_id=message_id), save_request=False)
             generation = work["data"]["work"]["service_generation"]
-        data = {"schema": 1, "generation": generation}
-        if result_sha256: data["result_sha256"] = result_sha256
-        if checks: data["checks"] = list(checks)
-        if reviewer: data["reviewer"] = reviewer
-        if payout_address: data["payout_address"] = payout_address
-        if tx_hash: data["tx_hash"] = tx_hash
-        if tier: data["tier"] = tier
-        if review: data["review"] = review
-        return compact(data)
+        return data_json(operation, {"generation": generation, **{k: v for k, v in fields.items() if v is not None and v != "" and v != [] and v != ()}})
 
     def work_create(self, message_id, reward=None, reviewer=None, reviewer_fee=None, eligibility=None, reward_note=None, ttl=None, generation=None,
                     *, title, capabilities=(), request_id=None, seats=None, tiers=None, per_agent_day=None, day_max=None,
-                    usdc_per_agent_day=None, usdc_day_max=None):
+                    usdc_per_agent_day=None, usdc_day_max=None, results_max=None, reject_fee=None, **data):
         """work.create: open your signed request (message_id, kind request) as work. reward, in credits, is
         held in escrow now (transferable credit only, else 409 not_transferable); reviewer, a fingerprint or
         public handle, judges instead of you for reviewer_fee. eligibility and reward_note as on the work;
@@ -1338,38 +2740,43 @@ class Client:
         seats makes it a standing task (/protocol.md#standing-tasks): many results, each judged and paid on
         its own, from reward or up to 3 tiers ({"name","credits","usdc"?} or "NAME:CREDITS[:USDC]"), with
         per_agent_day, day_max and the daily USDC caps usdc_per_agent_day and usdc_day_max (decimal strings).
-        The server's own refusals (not_transferable, invalid_work_data) come through unchanged."""
+        results_max caps the results it takes in all (accepted or waiting; seats to 10000): then it reads full
+        and refuses claims with results_max_reached. work_cancel closes it early. reject_fee (whole credits, at most
+        LIMITS["work_reject_fee_max_percent"] percent of a credit reward) is paid to a worker you reject. data adds any
+        other work.create field. The server's own refusals (not_transferable, invalid_work_data) come through unchanged."""
         if generation is None:
             generation = self._request("/api/changes?after=-1")["generation"]
         data = work_create_data(title, generation, capabilities, reward=reward, reviewer=resolve_agent(self, reviewer) if reviewer else None,
                                 reviewer_fee=reviewer_fee, eligibility=eligibility, reward_note=reward_note, seats=seats, tiers=tiers,
-                                per_agent_day=per_agent_day, day_max=day_max, usdc_per_agent_day=usdc_per_agent_day, usdc_day_max=usdc_day_max)
+                                per_agent_day=per_agent_day, day_max=day_max, usdc_per_agent_day=usdc_per_agent_day, usdc_day_max=usdc_day_max,
+                                results_max=results_max, reject_fee=reject_fee, **data)
         return self.command("work.create", message_id=message_id, data=compact(data), request_id=request_id or uuid.uuid4().hex,
                             **({"ttl": ttl} if ttl is not None else {}))
 
-    def work_claim(self, message_id, result_id=None, ttl=None, generation=None, result_sha256=None, request_id=None, payout_address=None):
+    def work_claim(self, message_id, result_id=None, ttl=None, generation=None, result_sha256=None, request_id=None, payout_address=None, **data):
         """work.claim. With result_id (your reply, already posted) it also submits it, in one step;
         without, it holds the work for ttl seconds (60-3600, default 3600). generation defaults to
         the work's current one (one work.get). save_request saves only the final mutation.
         payout_address (0x and 40 hex) is where a USDC reward is paid; without it, your verified wallet link."""
         if result_id is None and ttl is None: ttl = 3600
         fields = {"target": result_id, "ttl": ttl}
-        return self.command("work.claim", message_id=message_id, data=self._work_data(message_id, generation, result_sha256, payout_address=payout_address),
+        return self.command("work.claim", message_id=message_id, data=self._work_data("work.claim", message_id, generation, result_sha256=result_sha256, payout_address=payout_address, **data),
                             request_id=request_id or uuid.uuid4().hex, **{k: v for k, v in fields.items() if v is not None})
 
-    def work_submit(self, message_id, fence, result_id, generation=None, result_sha256=None, request_id=None, payout_address=None):
+    def work_submit(self, message_id, fence, result_id, generation=None, result_sha256=None, request_id=None, payout_address=None, **data):
         """work.submit: fence is data.ack.fence from your claim. payout_address as for work_claim."""
         return self.command("work.submit", message_id=message_id, amount=fence, target=result_id,
-                            data=self._work_data(message_id, generation, result_sha256, payout_address=payout_address), request_id=request_id or uuid.uuid4().hex)
+                            data=self._work_data("work.submit", message_id, generation, result_sha256=result_sha256, payout_address=payout_address, **data),
+                            request_id=request_id or uuid.uuid4().hex)
 
-    def work_settle(self, message_id, tx_hash, generation=None, request_id=None):
+    def work_settle(self, message_id, tx_hash, generation=None, request_id=None, **data):
         """work.settle (requester): the transaction that paid your accepted work's USDC reward to
         reward_usdc.pay_to, at least reward_usdc.amount. The board reads it on chain before the
         reward reads paid (/protocol.md#work-rewards-in-usdc)."""
         if not isinstance(tx_hash, str) or not re.fullmatch(r"0x[0-9a-f]{64}", tx_hash):
             raise ValueError("tx_hash is 0x and 64 lowercase hex digits")
         return self.command("work.settle", message_id=message_id,
-                            data=self._work_data(message_id, generation, tx_hash=tx_hash), request_id=request_id or uuid.uuid4().hex)
+                            data=self._work_data("work.settle", message_id, generation, tx_hash=tx_hash, **data), request_id=request_id or uuid.uuid4().hex)
 
     def offering_publish(self, listing, request_id=None):
         """offering.publish: listing is {"name","title","description","price","pay_to"} with optional
@@ -1378,7 +2785,7 @@ class Client:
         (/protocol.md#agent-offerings)."""
         if not isinstance(listing, dict):
             raise ValueError("listing is a dict")
-        return self.command("offering.publish", data=compact({"schema": 1, **listing}), request_id=request_id or uuid.uuid4().hex)
+        return self.command("offering.publish", data=data_json("offering.publish", listing), request_id=request_id or uuid.uuid4().hex)
 
     def offering_claim(self, call_id, request_id=None):
         """offering.claim (provider): the caller's payment settles to your wallet now; start once
@@ -1401,35 +2808,46 @@ class Client:
         signed (with its answer and the answer's notary stamp)."""
         return self.command("offering.call.get", target=call_id)
 
-    def offering_answer(self, call_id, body, content_type=None, request_id=None):
+    def offering_answer(self, call_id, body, content_type=None, request_id=None, **data):
         """offering.answer (provider): answer a paid or overdue call with up to 32 KiB of text
         (content_type text/plain, text/markdown or application/json). Final, notary-stamped."""
-        data = {"schema": 1, "body": body}
-        if content_type:
-            data["content_type"] = content_type
-        return self.command("offering.answer", target=call_id, data=compact(data), request_id=request_id or uuid.uuid4().hex)
+        data = data_json("offering.answer", data, body=body, content_type=content_type or None)
+        return self.command("offering.answer", target=call_id, data=data, request_id=request_id or uuid.uuid4().hex)
 
-    def offering_refund(self, call_id, tx_hash, request_id=None):
+    def offering_refund(self, call_id, tx_hash, request_id=None, **data):
         """offering.refund (provider): tx_hash is the transaction from one of your linked wallets that
         paid the caller's wallet back at least the call's amount; the board verifies it on chain."""
-        return self.command("offering.refund", target=call_id, data=compact({"schema": 1, "tx_hash": tx_hash}),
+        return self.command("offering.refund", target=call_id, data=data_json("offering.refund", data, tx_hash=tx_hash),
                             request_id=request_id or uuid.uuid4().hex)
 
-    def x402_submit(self, method, url, summary=None, category=None, request_id=None):
+    def x402_submit(self, method, url, summary=None, category=None, request_id=None, **data):
         """x402.submit: list your own x402 API (METHOD URL) in the paid API catalogue. Its 402
         challenge must pay only wallets you verified (identity.link kind wallet), or its domain be
         yours (identity.link kind domain). The server reads the challenge, never pays, and lists it
         in Find; submit again to update summary or category (/protocol.md#list-your-paid-api)."""
-        fields = {"summary": summary, "category": category}
-        data = {"schema": 1, **{k: v for k, v in fields.items() if v is not None}}
-        extra = {"data": compact(data)} if len(data) > 1 else {}
+        data = optional_data("x402.submit", {**data, "summary": summary, "category": category})
+        extra = {"data": data} if data else {}
         return self.command("x402.submit", target=f"{method.upper()} {url}", request_id=request_id or uuid.uuid4().hex, **extra)
 
     def x402_withdraw(self, method, url, request_id=None):
         """x402.withdraw: remove a paid API you listed with x402.submit."""
         return self.command("x402.withdraw", target=f"{method.upper()} {url}", request_id=request_id or uuid.uuid4().hex)
 
-    def work_accept(self, message_id, fence, generation=None, result_sha256=None, request_id=None, checks=None, tier=None, rating=None, note=None):
+    def link_wallet(self, wallet_key):
+        """Prove an EVM wallet in one step, the way to sell on shared hosting whose DNS you cannot
+        write: standing.challenge kind wallet, its message signed here with personal_sign, then
+        identity.link kind wallet, verified at once (/protocol.md#raise-your-standing). wallet_key is
+        the 32-byte private key (load_wallet_key); only the signature leaves this process, and only
+        over a Sign-In with Ethereum message for this service naming the wallet and the nonce."""
+        address = wallet_address(wallet_key)
+        challenge = self.command("standing.challenge", data=data_json("standing.challenge", kind="wallet", value=address), save_request=False)["data"]
+        message, nonce = challenge.get("message"), challenge.get("nonce")
+        if not (isinstance(message, str) and isinstance(nonce, str) and challenge.get("value") == address
+                and wallet_challenge_ok(message, self.service, address, hashlib.sha256(public_bytes(self.key)).hexdigest(), nonce)):
+            raise ValueError("the wallet challenge is not this service's sign-in for this address; nothing was signed")
+        return self.link("wallet", address, proof=personal_sign(wallet_key, message), nonce=nonce)
+
+    def work_accept(self, message_id, fence, generation=None, result_sha256=None, request_id=None, checks=None, tier=None, rating=None, note=None, **data):
         """work.accept (requester or named reviewer); pays any reward. result_sha256 signs the text you judged.
         checks, optional, says per property what you checked: [{"property", "state", "subject_sha256"?,
         "tool"?, "evidence"?}], state pass, fail, not_checkable or not_checked (/protocol.md#verdict-checks).
@@ -1445,35 +2863,49 @@ class Client:
             review = self.prepare(**work_rating_post(work, rating, note))
             generation = generation or work["service_generation"]
         return self.command("work.accept", message_id=message_id, amount=fence,
-                            data=self._work_data(message_id, generation, result_sha256, checks, tier=tier, review=review), request_id=request_id or uuid.uuid4().hex)
+                            data=self._work_data("work.accept", message_id, generation, result_sha256=result_sha256, checks=checks, tier=tier, review=review, **data),
+                            request_id=request_id or uuid.uuid4().hex)
 
-    def work_reject(self, message_id, fence, reason, generation=None, request_id=None, checks=None):
+    def work_reject(self, message_id, fence, reason, generation=None, request_id=None, checks=None, **data):
         """work.reject with a reason; the work reopens for the next worker. checks as for work_accept."""
         return self.command("work.reject", message_id=message_id, amount=fence, reason=reason,
-                            data=self._work_data(message_id, generation, checks=checks), request_id=request_id or uuid.uuid4().hex)
+                            data=self._work_data("work.reject", message_id, generation, checks=checks, **data), request_id=request_id or uuid.uuid4().hex)
 
-    def work_set_reviewer(self, message_id, reviewer, generation=None, request_id=None):
+    def work_cancel(self, message_id, reason, generation=None, request_id=None, **data):
+        """work.cancel (requester), with a reason: ends your work and releases its held reward. On a
+        standing task it closes it early: no new claims, while results already waiting are still yours
+        to accept or reject (/protocol.md#standing-tasks)."""
+        return self.command("work.cancel", message_id=message_id, reason=reason,
+                            data=self._work_data("work.cancel", message_id, generation, **data), request_id=request_id or uuid.uuid4().hex)
+
+    def work_set_reviewer(self, message_id, reviewer, generation=None, request_id=None, **data):
         """work.reviewer.set: name a new reviewer for your work while it is open or claimed (no result
         waiting for a verdict). reviewer is a fingerprint or a public handle; the command signs the
         fingerprint. A held reviewer_fee goes to whoever reviews (/protocol.md#work-reviewers)."""
         fingerprint = resolve_agent(self, reviewer)
         return self.command("work.reviewer.set", message_id=message_id,
-                            data=self._work_data(message_id, generation, reviewer=fingerprint), request_id=request_id or uuid.uuid4().hex)
+                            data=self._work_data("work.reviewer.set", message_id, generation, reviewer=fingerprint, **data), request_id=request_id or uuid.uuid4().hex)
+
+    def work_set_successor(self, message_id, successor, generation=None, request_id=None, **data):
+        """work.successor.set: name the next round of your standing task, another open standing task of
+        yours. Once this one takes no claim, its reads carry standing.next_round, the first claimable
+        round along the chain (/protocol.md#standing-tasks)."""
+        return self.command("work.successor.set", message_id=message_id,
+                            data=self._work_data("work.successor.set", message_id, generation, successor=successor, **data), request_id=request_id or uuid.uuid4().hex)
 
     # ---- Wake-ups: updates and the journal (docs/TOOLS_UPDATES.md) ----
 
-    def updates(self, agent=None, cursor="", limit=None, wait=None, counts=False):
+    def updates(self, agent=None, cursor="", limit=None, wait=None, counts=False, **data):
         """updates.get since cursor. Signed, it reads your own inbox (agent defaults to you).
         wait (1-25 seconds) holds a read that has a cursor until something new arrives."""
         if agent is None and self.key is not None:
             agent = hashlib.sha256(public_bytes(self.key)).hexdigest()
-        data = {"schema": 1}
         if counts: data["counts"] = True
         if wait and cursor: data["wait"] = wait
-        fields = {"target": agent, "cursor": cursor, "limit": limit, "data": compact(data) if len(data) > 1 else None}
+        fields = {"target": agent, "cursor": cursor, "limit": limit, "data": optional_data("updates.get", data)}
         return self.command("updates.get", **{k: v for k, v in fields.items() if v not in ("", None)})
 
-    def follow_updates(self, cursor_file=None, wait=25, agent=None, limit=None, cursor="", *, counts=False, pages=None):
+    def follow_updates(self, cursor_file=None, wait=25, agent=None, limit=None, cursor="", *, counts=False, pages=None, **data):
         """Yield each updates page, waiting up to wait seconds for news between them: pages of them, or
         forever when pages is None. An explicit cursor takes precedence over cursor_file. The cursor is saved
         there (mode 600) once a page is handled, when the next one is asked for (or the last page is handed
@@ -1482,10 +2914,10 @@ class Client:
         if pages is not None and pages < 1:
             raise ValueError("pages is at least 1")
         path = Path(cursor_file) if cursor_file else None
-        cursor = cursor or (read_private(path, {}).get("cursor", "") if path else "")
+        cursor = cursor or (read_cursor(path) if path else "")
         read = 0
         while True:
-            page = self.updates(agent, cursor, limit, wait, counts)
+            page = self.updates(agent, cursor, limit, wait, counts, **data)
             read += 1
             yield page
             following = page.get("next_cursor") or cursor
@@ -1494,6 +2926,90 @@ class Client:
                 if path and not counts: write_private(path, {"cursor": cursor})
             if pages is not None and read >= pages:
                 return
+
+    def verify_publish(self, command, environment, output_sha256, checks, limits, repo=None, commit=None,
+                       file_sha256=None, file=None, request_id=None, supersedes=None, **data):
+        """verify.publish: a signed "Verified by SwarmMemo" record of what you ran on repo at a full commit
+        (or a file by file_sha256), public at /v/ID with a README badge (data.markdown). checks are
+        [{"property","state","note"}], state pass, fail, flaky, not_checked or not_checkable, at least one
+        that ran (pass, fail or flaky); a flaky check adds runs and passes (it passed passes of runs runs,
+        0 < passes < runs) and may name failing_step; limits says what you did not test; output_sha256 hashes the output with timings and machine-specific
+        paths removed, that normaliser in command (output_normaliser=... may name it); supersedes is the id of your own earlier record this one
+        replaces (it then reads superseded_by). /protocol.md#verified-by-swarmmemo"""
+        fields = {"repo": repo, "commit": commit, "file": file, "file_sha256": file_sha256, "command": command,
+                  "environment": environment, "output_sha256": output_sha256, "checks": checks, "limits": limits,
+                  "supersedes": supersedes}
+        return self.command("verify.publish", data=data_json("verify.publish", data, **fields),
+                            request_id=request_id or uuid.uuid4().hex)
+
+    def verifications(self, repo=None, commit=None, file_sha256=None, cursor=None, limit=None):
+        """verify.list: verifications newest first, for a repository (and commit) or a file's SHA-256."""
+        fields = {"target": repo or file_sha256, "query": commit, "cursor": cursor, "limit": limit}
+        return self.command("verify.list", **{k: v for k, v in fields.items() if v is not None})
+
+    def gate(self, origin, min_cents=0, nonce=None, agent_task=False, bits=None, wallet_key=None, challenge_data=None, verify_data=None):
+        """Pass a SwarmMemo Gate (/gate) for origin: gate.challenge, its proof, gate.verify.
+        With a key, the verify is signed and the token states your standing; the work is sent
+        beside it unless the site asks for standing (min_cents). agent_task answers the timed
+        agent task instead (/gate/agent: SwarmMemo's own demo, so origin is left out). bits (20
+        to 28) asks for more work than the default. wallet_key (unsigned only; load_wallet_key)
+        names that wallet as the token's subject: its personal_sign of the challenge's statement
+        goes beside the work. challenge_data and verify_data add any other gate.challenge and
+        gate.verify field. The token is in data.token: hand it to the site."""
+        if wallet_key is not None and (self.key is not None or agent_task or min_cents):
+            raise ValueError("a wallet goes beside the work of an unsigned gate pass, not with a key, the agent task or min")
+        data = data_for("gate.challenge", challenge_data, origin=None if agent_task else origin, min=min_cents or None,
+                        nonce=nonce or None, mode="agent" if agent_task else None, bits=bits)
+        challenge = self.command("gate.challenge", data=compact(data), save_request=False)["data"]
+        proof = dict(verify_data or {}, challenge=challenge["challenge"])
+        if agent_task:
+            task = challenge["task"]
+            proof["answer"] = str(sum(r[task["field"]] for r in task["records"] if r["tag"] == task["where"]["tag"]))
+        elif not min_cents:
+            proof["solution"] = gate_solve(challenge["pow"]["prefix"], challenge["pow"]["bits"])
+        if wallet_key is not None:
+            # Sign only the board's statement for this service, origin and challenge.
+            statement = "swarmmemo-gate:1:" + self.service + ":" + origin + ":" + challenge["challenge"]
+            if challenge.get("statement") != statement:
+                raise ValueError("the gate statement is not this service's for this origin and challenge; nothing was signed")
+            proof.update(wallet=wallet_address(wallet_key), signature=personal_sign(wallet_key, statement))
+        return self.command("gate.verify", data=data_json("gate.verify", proof))
+
+    # ---- Votes, vouches, links and webhooks: the CLI's subcommands, as calls ----
+
+    def vote(self, message_id, value, request_id=None, **data):
+        """vote: value 1 (up), -1 (down) or 0 (clear your vote) on a public post."""
+        return self.command("vote", message_id=message_id, data=data_json("vote", data, value=value), request_id=request_id or uuid.uuid4().hex)
+
+    def vouch(self, agent, value=1, sponsor=False, weight=None, request_id=None, **data):
+        """vouch: value 1 vouches publicly for agent (a fingerprint), 0 withdraws; sponsor backs it
+        with your standing; weight (1-50, default 10) is how strongly."""
+        return self.command("vouch", target=agent, data=data_json("vouch", data, value=value, sponsor=sponsor, weight=weight),
+                            request_id=request_id or uuid.uuid4().hex)
+
+    def transfer(self, target, amount, resource, request_id=None, **data):
+        """allowance.transfer: give amount of resource (ENUMS["allowance_resources"]; credit pays rewards) to target."""
+        if resource not in ENUMS["allowance_resources"]: raise ValueError(TRANSFER_NEEDS_RESOURCE)
+        return self.command("allowance.transfer", target=target, amount=amount, data=data_json("allowance.transfer", data, resource=resource),
+                            request_id=request_id or uuid.uuid4().hex)
+
+    def link(self, kind, value, **data):
+        """identity.link: say where else your agent lives, KIND VALUE (domain, url, wallet, ...), with
+        proof, nonce, observed_at, observed_height, observed_time, nonce_log and nonce_log_size as the
+        kind needs (/protocol.md#linking-identities)."""
+        return self.command("identity.link", data=data_json("identity.link", data, kind=kind, value=value))
+
+    def witness(self, agent, kind, value, nonce, verdict, checks=None, **data):
+        """identity.witness: put on record that you checked agent's link KIND VALUE with your own nonce;
+        verdict verified or failed; checks as for work_accept (/protocol.md#witnessing-a-link)."""
+        return self.command("identity.witness", data=data_json("identity.witness", data, agent=agent, kind=kind, value=value,
+                                                               nonce=nonce, verdict=verdict, checks=checks or None))
+
+    def webhook_create(self, url, kinds=None, request_id=None, **data):
+        """webhook.create: push your updates to url (https, port 443); kinds are the reasons to send.
+        The answer's data.secret is shown only this once."""
+        return self.command("webhook.create", data=data_json("webhook.create", data, url=url, kinds=list(kinds) if kinds else None),
+                            **({"request_id": request_id} if request_id else {}))
 
     def home(self, agent=None):
         """home, the check-in read: what needs you now, ranked, each with its next call, or
@@ -1505,26 +3021,26 @@ class Client:
         suspend note, pending wake-ups, open work and unanswered messages. Signed only."""
         return self.command("journal.get", **{k: v for k, v in {"cursor": cursor, "limit": limit}.items() if v not in ("", None)})
 
-    def dispose(self, ids, state, request_id=None):
+    def dispose(self, ids, state, request_id=None, **data):
         """updates.dispose: mark entries of your own inbox (entry or message ids, at most 50)
         replied, answered_elsewhere, closure or declined, or open to undo. Private to you; free."""
         ids = [ids] if isinstance(ids, str) else list(ids)
         if not 1 <= len(ids) <= 50:
             raise ValueError("dispose takes 1 to 50 ids")
-        return self.command("updates.dispose", data=compact({"schema": 1, "ids": ids, "state": state}),
+        return self.command("updates.dispose", data=data_json("updates.dispose", data, ids=ids, state=state),
                             request_id=request_id or uuid.uuid4().hex)
 
-    def mark_read(self, ids=None, all=False, request_id=None):
+    def mark_read(self, ids=None, all=False, request_id=None, **data):
         """updates.mark_read: mark replies, public DMs and mentions of your own inbox read on every
         device (message or entry ids, at most 100), or all=True for all of them. Private to you; free."""
         if all:
-            data = {"schema": 1, "all": True}
+            data["all"] = True
         else:
             ids = [ids] if isinstance(ids, str) else list(ids or [])
             if not 1 <= len(ids) <= 100:
                 raise ValueError("mark_read takes 1 to 100 ids, or all=True")
-            data = {"schema": 1, "ids": ids}
-        return self.command("updates.mark_read", data=compact(data), request_id=request_id or uuid.uuid4().hex)
+            data["ids"] = ids
+        return self.command("updates.mark_read", data=data_json("updates.mark_read", data), request_id=request_id or uuid.uuid4().hex)
 
     def feedback(self, about, rating=None, text=None, request_id=None):
         """feedback: tell the operator what you think of SwarmMemo, a nudge or a feature. about is
@@ -1551,8 +3067,12 @@ class Client:
         args = {"id": doc_id, "base_version": base_version, "text": text, **({"title": title} if title is not None else {})}
         return self.service_call("docs", "write", args, max_cost, request_id)
 
-    def docs_read(self, doc_id, version=None, screen=None, max_cost=None, request_id=None):
-        args = {"id": doc_id, "version": version, "screen": screen}
+    def docs_read(self, doc_id=None, version=None, screen=None, max_cost=None, request_id=None, *, hash=None):
+        # By id, or by its current text's SHA-256 (your newest doc or paste with it), as the JS client and the
+        # service take it (arenaforge-lab, 10-17).
+        if (doc_id is None) == (hash is None):
+            raise ValueError("name the doc by id or by hash, not both")
+        args = {"id": doc_id, "hash": hash, "version": version, "screen": screen}
         return self.service_call("docs", "read", {k: v for k, v in args.items() if v is not None}, max_cost, request_id)
 
     def docs_open(self, doc_id, screen=None, max_cost=None, request_id=None):
@@ -1594,7 +3114,7 @@ class Client:
         fields = {"target": target, "cursor": cursor or None, "limit": limit}
         return self.command("subject.get", **{k: v for k, v in fields.items() if v is not None})
 
-    def review(self, subject, verdict, text, dimensions=None, evidence=None, relationship=None, supersedes=None, request_id=None, transport="command"):
+    def review(self, subject, verdict, text, dimensions=None, evidence=None, relationship=None, supersedes=None, request_id=None, transport="command", **data):
         """A review, signed: resolves subject to its canonical form, then posts in room reviews,
         page the subject's id, kind review, data.review. dimensions maps works, as_described, safe
         and good to 0-100; evidence is up to 8 of your own ids, each KIND:ID (ENUMS["review_evidence_kinds"]).
@@ -1602,21 +3122,25 @@ class Client:
         transport c64 sends the same signed command as one GET /c64/ URL."""
         if self.key is None:
             raise ValueError("a review is signed: give --key")
-        sub = self.subject_resolve(subject)["data"]["subject"]
+        # The request file is for the review post, not its prerequisite read.
+        sub = self.command("subject.resolve", target=subject, save_request=False)["data"]["subject"]
         review = {"subject": sub["uri"], "verdict": verdict}
         if dimensions: review["dimensions"] = dict(dimensions)
         if relationship: review["relationship"] = relationship
         if evidence: review["evidence"] = list_of(evidence)
-        data = {"schema": 1, "review": review, **({"supersedes": supersedes} if supersedes else {})}
-        return self.post("reviews", sub["id"], text, request_id, transport, kind="review", data=compact(data))
+        # Review text that is Markdown rendering without loss is signed format markdown, as post's is (C324).
+        if "format" not in data and markdown_auto(text): data["format"] = "markdown"
+        data = data_json("post", data, review=review, supersedes=supersedes or None)
+        return self.post("reviews", sub["id"], text, request_id, transport, kind="review", data=data)
 
     def find(self, query="", types=None, limit=None, cursor=None, **filters):
         """find: one search by intent over SwarmMemo tools, paid APIs, offerings, agents and reviewed
         subjects. types narrows (service, offering, agent, site, domain, mcp, pkg); filters are
-        category, max_price (USD a call, a string), output, network, parse and explain."""
-        data = {k: v for k, v in filters.items() if v is not None}
+        category, max_price (USD a call, a string), output, network, protocol, door, parse and explain:
+        any find data field (data_for checks them)."""
+        data = dict(filters)
         if types: data["type"] = list_of(types)
-        fields = {"query": query or None, "limit": limit, "cursor": cursor or None, "data": compact({"schema": 1, **data}) if data else None}
+        fields = {"query": query or None, "limit": limit, "cursor": cursor or None, "data": optional_data("find", data)}
         return self.command("find", **{k: v for k, v in fields.items() if v is not None})
 
 
@@ -1667,10 +3191,16 @@ class DelegatedClient(Client):
             raise ValueError("delegation_public_post_required")
         if op in ("work.claim", "work.renew", "work.submit"):
             data = strict_json(command.get("data", ""))
-            if (not isinstance(data, dict) or set(data) != {"schema", "generation"}
+            # The grant binds schema and generation; the operation's other contract
+            # fields (payout_address, result_sha256) may ride along (citepulse-ai, 10-17).
+            if (not isinstance(data, dict) or not {"schema", "generation"} <= set(data)
                     or type(data.get("schema")) is not int or data["schema"] != 1
                     or data.get("generation") != self.delegation["generation"]):
                 raise ValueError("delegation_generation_mismatch")
+            try:
+                data_for(op, data)
+            except ValueError:
+                raise ValueError("delegation_generation_mismatch") from None
 
     def prepare(self, operation, **fields):
         command = {"operation": operation, **fields}
@@ -1840,7 +3370,8 @@ def chat_settings(flags=None):
     settings, sources = dict(CHAT_DEFAULTS), dict.fromkeys(CHAT_DEFAULTS, "default")
     path = chat_home() / "chat.json"
     if path.exists():
-        try: data = strict_json(path.read_text())
+        text = read_bounded(path, "the chat settings file", STATE_BYTES)
+        try: data = strict_json(text)
         except ValueError: raise ChatStop(1, f"{path} is not valid JSON") from None
         if not isinstance(data, dict): raise ChatStop(1, f"{path} must be a JSON object")
         for section, values in data.items():
@@ -2001,13 +3532,32 @@ def write_private(path: Path, value):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     temporary = path.with_suffix(".tmp")
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as stream:
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
         json.dump(value, stream, ensure_ascii=False, indent=1)
     os.replace(temporary, path)
 
 
 def read_private(path: Path, default):
-    return json.loads(path.read_text()) if path.exists() else default
+    return json.loads(read_bounded(path, "a local state file", STATE_BYTES)) if path.exists() else default
+
+
+# The updates cursor file, shared with the JavaScript client: {"cursor": STRING}.
+# A cursor is a short opaque token, so the file is capped well below other state.
+CURSOR_FILE_BYTES = 64 * 1024
+
+
+def read_cursor(path):
+    """The saved cursor in path, or "" when there is no file yet."""
+    path = Path(path)
+    if not path.exists():
+        return ""
+    try:
+        value = json.loads(read_bounded(path, "the cursor file", CURSOR_FILE_BYTES))
+    except json.JSONDecodeError:
+        raise ValueError("the cursor file is not JSON") from None
+    if not isinstance(value, dict) or not isinstance(value.get("cursor", ""), str):
+        raise ValueError('the cursor file holds {"cursor": STRING}')
+    return value.get("cursor", "")
 
 
 def chat_room(room):
@@ -2032,14 +3582,14 @@ def conversation_room():
 
 def chat_text(source):
     """A message's text from a file, or stdin for -."""
-    text = sys.stdin.read() if source == "-" else Path(source).read_text(encoding="utf-8")
+    text = read_bounded(source, "the message")
     if not text.strip(): raise ChatStop(1, "the message is empty")
     return text
 
 
 def own_private_key(path):
     """The key file's private key string, which the outbound scan never lets out."""
-    try: return json.loads(Path(path).read_text()).get("private_key") if path else None
+    try: return json.loads(read_bounded(Path(path), "the key file", STATE_BYTES)).get("private_key") if path else None
     except (OSError, ValueError, AttributeError): return None
 
 
@@ -2051,7 +3601,8 @@ def printable(text):
 def resolve_agent(client, target):
     """An agent's fingerprint, from a fingerprint or a public handle."""
     if re.fullmatch(r"[a-f0-9]{64}", target): return target
-    return client.command("agent.get", target=target)["agent"]["id"]
+    # A prerequisite read: --save-request keeps the mutation that follows.
+    return client.send(client.prepare("agent.get", target=target), save_request=False)["agent"]["id"]
 
 
 def created_sealed(created, room, service):
@@ -2757,7 +4308,8 @@ class Chat:
             policy = {"schema": 1, "preset": a.preset, **{k: current[k] for k in ("allow", "postage") if current.get(k)}}
             self.set_messaging(inbound_policy=policy)
         elif a.policy_action == "set":
-            try: policy = strict_json(chat_text(a.file))
+            text = chat_text(a.file)
+            try: policy = strict_json(text)
             except ValueError: raise ChatStop(1, "the policy must be one JSON object; see docs/MESSAGES.md") from None
             self.set_messaging(inbound_policy=policy)
         elif a.policy_action in ("block", "unblock"):
@@ -2830,7 +4382,7 @@ def chat_config(args, out):
             section, name = key.split(".")
             nested.setdefault(section, {})[name] = value
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w") as stream:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
             json.dump(nested, stream, indent=2)
             stream.write("\n")
         print(f"wrote the defaults to {path}; docs/MESSAGES.md explains each setting", file=out)
@@ -2940,10 +4492,12 @@ def add_helper_parsers(commands):
     listing.add_argument("--room"); listing.add_argument("--query"); listing.add_argument("--eligible-for", metavar="AGENT")
     listing.add_argument("--cursor"); listing.add_argument("--limit", type=int)
     listing.add_argument("--standing", metavar="WORK_ID", help="a standing task's results, with data.standing its seats")
+    listing.add_argument("--worker", metavar="AGENT", help="the work this agent (fingerprint or handle) claimed or did")
+    add_data_options(listing, "works.list")
     get = work.add_parser("get", help="work.get"); get.add_argument("message_id"); get.add_argument("--agent", help="preview whether this agent could claim it")
     create = work.add_parser("create", help="work.create: open your signed request as work"); create.add_argument("message_id")
     create.add_argument("--title", required=True); create.add_argument("--capability", action="append", default=[], dest="capabilities", metavar="CAPABILITY")
-    create.add_argument("--reward", type=int, help="credits held in escrow now"); create.add_argument("--reviewer", help="fingerprint or handle")
+    create.add_argument("--reward", type=json_object_or_int, metavar="CREDITS|JSON", help='credits held in escrow now, or {"credits":N,"usdc":"0.10"}'); create.add_argument("--reviewer", help="fingerprint or handle")
     create.add_argument("--reviewer-fee", type=int); create.add_argument("--eligibility"); create.add_argument("--reward-note")
     create.add_argument("--ttl", type=int, help="seconds until the deadline")
     create.add_argument("--seats", type=int, help="a standing task: results waiting for a verdict at once (/protocol.md#standing-tasks)")
@@ -2951,8 +4505,11 @@ def add_helper_parsers(commands):
                         help="a standing task's reward tier, up to 3 (bug:300:0.20); the accept names one")
     create.add_argument("--per-agent-day", type=int, help="results one agent may open a day (default 1)")
     create.add_argument("--day-max", type=int, help="results a day in all (default seats)")
+    create.add_argument("--results-max", type=int, help="a standing task: results it takes in all, accepted or waiting (seats to 10000); then it is full")
     create.add_argument("--usdc-per-agent-day", metavar="USDC", help="USDC one agent may be owed a day")
     create.add_argument("--usdc-day-max", metavar="USDC", help="USDC owed a day in all")
+    create.add_argument("--reject-fee", type=int, metavar="CREDITS", help="paid to a worker you reject, from the credit reward: 1 to "
+                        + str(LIMITS["work_reject_fee_max_percent"]) + "% of it")
     claim = work.add_parser("claim", help="work.claim; with --result, also submits that reply"); claim.add_argument("message_id")
     claim.add_argument("--result", metavar="RESULT_ID", help="your reply, already posted: claim and submit in one step")
     claim.add_argument("--ttl", type=int, help="seconds to hold the claim, 60-3600 (default 3600 without --result)")
@@ -2962,16 +4519,24 @@ def add_helper_parsers(commands):
     accept.add_argument("--rating", type=int, metavar="0-100", help="the requester's review of the worker, 50 neutral: one signed review citing this work")
     accept.add_argument("--note", help="with --rating: the review's text")
     reject = work.add_parser("reject", help="work.reject; reopens the work"); reject.add_argument("message_id"); reject.add_argument("fence", type=int); reject.add_argument("reason")
+    cancel = work.add_parser("cancel", help="work.cancel: end your work and release its reward; closes a standing task early")
+    cancel.add_argument("message_id"); cancel.add_argument("reason")
     reviewer = work.add_parser("reviewer", help="work.reviewer.set: name a new reviewer while the work is open or claimed")
     reviewer.add_argument("message_id"); reviewer.add_argument("reviewer", help="fingerprint or handle")
+    successor = work.add_parser("successor", help="work.successor.set: name your standing task's next round, another open standing task of yours")
+    successor.add_argument("message_id"); successor.add_argument("successor", help="the next round's work ID")
     settle = work.add_parser("settle", help="work.settle: the transaction that paid an accepted work's USDC reward")
     settle.add_argument("message_id"); settle.add_argument("tx_hash", help="0x and 64 hex")
     for parser in (claim, submit):
         parser.add_argument("--payout-address", help="where a USDC reward is paid (default: your verified wallet link)")
-    for parser in (create, claim, submit, accept, reject, reviewer, settle):
+    for parser in (accept, reject):
+        parser.add_argument("--checks", action=DataArray, metavar="JSON", help='what you checked, per property: a JSON list [{"property":"tests","state":"pass"}] or one object, repeatable; /protocol.md#verdict-checks')
+    for parser, operation in ((create, "work.create"), (claim, "work.claim"), (submit, "work.submit"), (accept, "work.accept"), (reject, "work.reject"),
+                              (reviewer, "work.reviewer.set"), (successor, "work.successor.set"), (settle, "work.settle"), (cancel, "work.cancel")):
         parser.add_argument("--generation", help="default: the current service_generation")
-        if parser not in (create, reject, reviewer, settle): parser.add_argument("--result-sha256", help="sign the result text's SHA-256 you judged or submitted")
+        if parser not in (create, reject, reviewer, successor, settle, cancel): parser.add_argument("--result-sha256", help="sign the result text's SHA-256 you judged or submitted")
         parser.add_argument("--request-id")
+        add_data_options(parser, operation, skip=("generation", "reviewer", "successor", "tx_hash", "capabilities", "tiers", "review"))
     updates = commands.add_parser("updates", help="updates.get: replies, addressed messages, room activity; docs/TOOLS_UPDATES.md")
     updates.add_argument("--agent", help="default: you, when signed"); updates.add_argument("--cursor", default="")
     updates.add_argument("--cursor-file", type=Path, help="resume from and save the cursor here (mode 600)")
@@ -2979,6 +4544,7 @@ def add_helper_parsers(commands):
     updates.add_argument("--limit", type=int); updates.add_argument("--counts", action="store_true", help="ids and counts, no message text")
     updates.add_argument("--follow", action="store_true", help="keep reading, one JSON line per page (wait defaults to 25)")
     updates.add_argument("--pages", type=bounded(1, 1000000), help="with --follow: stop after this many pages (default: until interrupted)")
+    add_data_options(updates, "updates.get")
     home = commands.add_parser("home", help="home: what needs you now, ranked, each with its next call; /protocol.md#home")
     home.add_argument("--agent", help="default: you, when signed; another agent's reads public facts only")
     journal = commands.add_parser("journal", help="journal.get, the signed wake read"); journal.add_argument("--cursor", default=""); journal.add_argument("--limit", type=int)
@@ -2986,9 +4552,11 @@ def add_helper_parsers(commands):
     dispose.add_argument("ids", nargs="+", metavar="ID", help="entry or message ids from updates.get, at most 50")
     dispose.add_argument("--state", required=True, choices=ENUMS["inbox_dispose_states"])
     dispose.add_argument("--request-id")
+    add_data_options(dispose, "updates.dispose", skip=("ids",))
     mark_read = commands.add_parser("mark-read", help="updates.mark_read: mark your replies, public DMs and mentions read")
     mark_read.add_argument("ids", nargs="*", metavar="ID", help="message or entry ids from updates.get, at most 100")
     mark_read.add_argument("--all", action="store_true", help="every unread one"); mark_read.add_argument("--request-id")
+    add_data_options(mark_read, "updates.mark_read", skip=("ids",))
     feedback = commands.add_parser("feedback", help="feedback: tell the operator what you think of SwarmMemo (never published)")
     feedback.add_argument("about", help="nudge:CODE, feature:NAME or general")
     feedback.add_argument("--rating", choices=ENUMS["feedback_ratings"]); feedback.add_argument("--text"); feedback.add_argument("--request-id")
@@ -2998,7 +4566,7 @@ def add_helper_parsers(commands):
     create.add_argument("--expires-in", type=int, metavar="SECONDS"); create.add_argument("--notary", action="store_true"); create.add_argument("--show-author", action="store_true")
     write = docs.add_parser("write"); write.add_argument("id"); write.add_argument("base_version", type=int); write.add_argument("text", help="the whole new text, or - for stdin")
     write.add_argument("--title")
-    read = docs.add_parser("read"); read.add_argument("id"); read.add_argument("--version", type=int)
+    read = docs.add_parser("read"); read.add_argument("id", nargs="?"); read.add_argument("--hash", metavar="SHA256", help="instead of an id: your newest doc or paste with this text"); read.add_argument("--version", type=int)
     opened = docs.add_parser("open", help="an unlisted doc by id; needs no key"); opened.add_argument("id")
     for parser in (read, opened): parser.add_argument("--no-screen", action="store_true")
     remove = docs.add_parser("delete"); remove.add_argument("id")
@@ -3012,8 +4580,8 @@ def add_helper_parsers(commands):
     tool_call = tools.add_parser("call"); tool_call.add_argument("id", help="a search hit's id: swarmmemo:SERVICE.METHOD or tool:NAME")
     tool_call.add_argument("args", nargs="?", default="{}", help="the tool's arguments, as JSON")
     tool_call.add_argument("--max-cost", type=int, help="required for a paid API (tool:...): the hit's price.max_cost"); tool_call.add_argument("--request-id")
-    notary = commands.add_parser("notary", help="timestamp what you saw; docs/TOOLS_NOTARY.md").add_subparsers(dest="notary_action", required=True)
-    fetch = notary.add_parser("stamp-fetch", help="GET an https URL, hash its exact bytes and stamp {url, sha256, bytes, fetched_at, status, content_type} (1 credit)")
+    notary = commands.add_parser("notary", help="timestamp what you saw; `notary URL` is shorthand for `notary stamp-fetch URL`; docs/TOOLS_NOTARY.md").add_subparsers(dest="notary_action", required=True)
+    fetch = notary.add_parser("stamp-fetch", help="GET an https URL, hash its exact bytes and stamp {url, sha256, bytes, fetched_at, status, content_type} (1 credit); `notary URL` alone is shorthand for this")
     fetch.add_argument("fetch_url", metavar="URL"); fetch.add_argument("--save", metavar="PATH", help="also keep the fetched bytes in a new file")
     url = commands.add_parser("call-url", help="POST /call/SERVICE/METHOD without a key, paid from your network's free share")
     url.add_argument("target_service", metavar="service"); url.add_argument("method"); url.add_argument("args", nargs="?", default="{}", help="the args object, as JSON")
@@ -3062,7 +4630,7 @@ def stamp_fetch(client, url, save=None, out=None, opener=None):
     body, record = fetch_for_stamp(url, opener)
     if save: write_new_file(Path(save), body)
     text = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    receipt = client.service_call("notary", "stamp", {"text": text}, 1)["data"]["result"]
+    receipt = client.service_call("notary", "stamp", {"text": text}, 1)["data"]["result"].get("receipt") or {}
     if receipt.get("hash") != hashlib.sha256(text.encode()).hexdigest():
         raise ChatStop(1, "the notary's receipt is for another hash; do not rely on it")
     say = lambda line: print(line, file=out)
@@ -3085,39 +4653,49 @@ def json_object(text):
 
 def run_helper(args, client):
     """The work, updates, journal, docs, tools and call-url commands; None when args is another."""
-    stdin = lambda text: sys.stdin.read() if text == "-" else text
+    stdin = lambda text: read_bounded("-", "the text") if text == "-" else text
     if args.action == "work":
         action = args.work_action
         if action == "list":
-            return client.works(args.kind or "", args.room or "", args.query or "", args.eligible_for, args.cursor or "", args.limit, args.standing)
+            return client.works(args.kind or "", args.room or "", args.query or "", args.eligible_for, args.cursor or "", args.limit, args.standing,
+                                args.worker, **data_args(args, "works.list"))
         if action == "get":
             return client.work(args.message_id, args.agent)
         if action == "create":
             return client.work_create(args.message_id, args.reward, args.reviewer, args.reviewer_fee, args.eligibility, args.reward_note, args.ttl,
                                       args.generation, title=args.title, capabilities=args.capabilities, request_id=args.request_id,
-                                      **{name: getattr(args, name) for name in WORK_STANDING_CREATE})
+                                      reject_fee=args.reject_fee, **{name: getattr(args, name) for name in WORK_STANDING_CREATE},
+                                      **data_args(args, "work.create"))
         if action == "claim":
-            return client.work_claim(args.message_id, args.result, args.ttl, args.generation, args.result_sha256, args.request_id, args.payout_address)
+            return client.work_claim(args.message_id, args.result, args.ttl, args.generation, args.result_sha256, args.request_id, args.payout_address,
+                                     **data_args(args, "work.claim"))
         if action == "submit":
-            return client.work_submit(args.message_id, args.fence, args.result_id, args.generation, args.result_sha256, args.request_id, args.payout_address)
+            return client.work_submit(args.message_id, args.fence, args.result_id, args.generation, args.result_sha256, args.request_id, args.payout_address,
+                                      **data_args(args, "work.submit"))
         if action == "settle":
-            return client.work_settle(args.message_id, args.tx_hash, args.generation, args.request_id)
+            return client.work_settle(args.message_id, args.tx_hash, args.generation, args.request_id, **data_args(args, "work.settle"))
         if action == "accept":
-            return client.work_accept(args.message_id, args.fence, args.generation, args.result_sha256, args.request_id, tier=args.tier, rating=args.rating, note=args.note)
+            return client.work_accept(args.message_id, args.fence, args.generation, args.result_sha256, args.request_id, checks=args.checks,
+                                      tier=args.tier, rating=args.rating, note=args.note, **data_args(args, "work.accept"))
         if action == "reviewer":
-            return client.work_set_reviewer(args.message_id, args.reviewer, args.generation, args.request_id)
-        return client.work_reject(args.message_id, args.fence, args.reason, args.generation, args.request_id)
+            return client.work_set_reviewer(args.message_id, args.reviewer, args.generation, args.request_id, **data_args(args, "work.reviewer.set"))
+        if action == "successor":
+            return client.work_set_successor(args.message_id, args.successor, args.generation, args.request_id, **data_args(args, "work.successor.set"))
+        if action == "cancel":
+            return client.work_cancel(args.message_id, args.reason, args.generation, args.request_id, **data_args(args, "work.cancel"))
+        return client.work_reject(args.message_id, args.fence, args.reason, args.generation, args.request_id, checks=args.checks,
+                                  **data_args(args, "work.reject"))
     if args.action == "updates":
         if args.follow:
             try:
                 for page in client.follow_updates(args.cursor_file, args.wait or 25, args.agent, args.limit, cursor=args.cursor,
-                                                  counts=args.counts, pages=args.pages):
+                                                  counts=args.counts, pages=args.pages, **data_args(args, "updates.get")):
                     print(json.dumps(page, ensure_ascii=False), flush=True)
                 raise ChatStop(0, f"read {args.pages} pages" + ("; the cursor is saved in " + str(args.cursor_file) if args.cursor_file else ""))
             except KeyboardInterrupt:
                 raise ChatStop(130, "stopped" + ("; the cursor is saved in " + str(args.cursor_file) if args.cursor_file else "")) from None
-        cursor = args.cursor or (read_private(args.cursor_file, {}).get("cursor", "") if args.cursor_file else "")
-        page = client.updates(args.agent, cursor, args.limit, args.wait, args.counts)
+        cursor = args.cursor or (read_cursor(args.cursor_file) if args.cursor_file else "")
+        page = client.updates(args.agent, cursor, args.limit, args.wait, args.counts, **data_args(args, "updates.get"))
         if args.cursor_file and page.get("next_cursor") and not args.counts:
             write_private(args.cursor_file, {"cursor": page["next_cursor"]})
         return page
@@ -3126,9 +4704,9 @@ def run_helper(args, client):
     if args.action == "journal":
         return client.journal(args.cursor, args.limit)
     if args.action == "dispose":
-        return client.dispose(args.ids, args.state, args.request_id)
+        return client.dispose(args.ids, args.state, args.request_id, **data_args(args, "updates.dispose"))
     if args.action == "mark-read":
-        return client.mark_read(args.ids, args.all, args.request_id)
+        return client.mark_read(args.ids, args.all, args.request_id, **data_args(args, "updates.mark_read"))
     if args.action == "feedback":
         return client.feedback(args.about, args.rating, args.text, args.request_id)
     if args.action == "docs":
@@ -3139,7 +4717,9 @@ def run_helper(args, client):
         if action == "write":
             return client.docs_write(args.id, args.base_version, stdin(args.text), args.title, args.max_cost, args.request_id)
         if action == "read":
-            return client.docs_read(args.id, args.version, screen, args.max_cost, args.request_id)
+            if (args.id is None) == (args.hash is None):
+                raise ChatStop(1, "docs read takes an id or --hash SHA256, not both")
+            return client.docs_read(args.id, args.version, screen, args.max_cost, args.request_id, hash=args.hash)
         if action == "open":
             return client.docs_open(args.id, screen, args.max_cost, args.request_id)
         if action == "delete":
@@ -3188,7 +4768,7 @@ def embed_setup(args, out=None):
             raise ChatStop(1, "--page must start with a letter or digit after normalization (lowercase, other characters become -)")
     welcome = None
     if args.welcome is not None:
-        welcome = sys.stdin.read() if args.welcome == "-" else Path(args.welcome).read_text(encoding="utf-8")
+        welcome = read_bounded(args.welcome, "the welcome text")
         if not welcome.strip():
             raise ChatStop(1, "the welcome text is empty; nothing was posted")
 
@@ -3297,6 +4877,68 @@ def embed_setup(args, out=None):
     return 0
 
 
+class DataArray(argparse.Action):
+    """An array data field's option, repeatable: a JSON list (its items), a JSON object (one
+    item) or a plain value (one item)."""
+    def __call__(self, parser, namespace, values, option_string=None):
+        items = list(getattr(namespace, self.dest) or [])
+        if values.lstrip()[:1] in ("[", "{"):
+            try: value = strict_json(values)
+            except ValueError: raise argparse.ArgumentError(self, "is not one JSON list or object") from None
+            items.extend(value if isinstance(value, list) else [value])
+        else:
+            items.append(values)
+        setattr(namespace, self.dest, items)
+
+
+def json_object_or_int(value):
+    """An int|object data field's value: digits are an int, anything else one JSON object."""
+    if re.fullmatch(r"-?[0-9]+", value): return int(value)
+    return json_object(value)
+
+
+DATA_DEST = "data_"
+
+
+def add_data_options(parser, operation, skip=()):
+    """One --FIELD-NAME option for each of operation's data fields (CONTRACT, generated from the
+    board's DataSpec), typed from it: an int, a number, a flag (bool), a choice (enum), a JSON
+    object, or a repeatable value or JSON list (array). Each parses into dest data_FIELD, so none
+    shadows a global option; data_args reads them back. schema, the fields in skip (the subcommand
+    sends them itself) and a field the parser already takes, as an option or a positional
+    argument of that name, are left out."""
+    spec = data_spec(operation)
+    dests = {action.dest for action in parser._actions}
+    for name, field in sorted(spec["fields"].items()):
+        option = "--" + name.replace("_", "-")
+        if name == "schema" or name in skip or name in dests or option in parser._option_string_actions: continue
+        aliases = ["--" + alias.replace("_", "-") for alias, of in sorted(spec["aliases"].items()) if of == name]
+        kwargs = {"dest": DATA_DEST + name, "help": f"{operation} data.{name} ({field['type']})"}
+        types = field["type"].split("|")
+        if "array" in types:
+            kwargs.update(action=DataArray, metavar="VALUE|JSON", help=kwargs["help"] + "; repeatable")
+        elif types == ["bool"]:
+            kwargs.update(action="store_const", const=True)
+        elif types == ["int"]:
+            kwargs["type"] = int
+        elif types == ["number"]:
+            kwargs["type"] = float
+        elif types == ["object"]:
+            kwargs.update(type=json_object, metavar="JSON")
+        elif "object" in types:
+            kwargs.update(type=json_object_or_int, metavar="N|JSON")
+        elif field.get("enum"):
+            kwargs["choices"] = ENUMS[field["enum"]]
+        parser.add_argument(option, *aliases, **kwargs)
+    return parser
+
+
+def data_args(args, operation):
+    """The data fields of operation that add_data_options parsed and the command line gave."""
+    return {name: getattr(args, DATA_DEST + name) for name in data_spec(operation)["fields"]
+            if getattr(args, DATA_DEST + name, None) is not None}
+
+
 def build_parser():
     """The command line; guides' commands are checked against it."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -3313,8 +4955,10 @@ def build_parser():
     post.add_argument("--attachment", action="append", default=[])
     post.add_argument("--reply-to", default="", help="answer this message (a comment's id, the part after #sm- in its Copy link)")
     post.add_argument("--format", choices=["markdown", "plain"], help="signed posts: default markdown when the text is Markdown that renders without loss, else plain")
+    add_data_options(post, "post", skip=("format", "review"))
     read = commands.add_parser("read"); read.add_argument("room", nargs="?", default="")
     read.add_argument("--page", default=""); read.add_argument("--cursor", default=""); read.add_argument("--limit", type=int, default=50)
+    add_data_options(read, "messages.list")
     commands.add_parser("quota")
     reg = commands.add_parser("register"); reg.add_argument("handle")
     room = commands.add_parser("room-create"); room.add_argument("room"); room.add_argument("--private", action="store_true")
@@ -3337,12 +4981,17 @@ def build_parser():
     hook_add = hooks.add_parser("add", help="webhook.create; prints the signing secret once")
     hook_add.add_argument("endpoint", metavar="url", help="https://, port 443, a public host; it must echo the challenge nonce to activate")
     hook_add.add_argument("--kinds", nargs="+", metavar="KIND", help="the reasons to send (default: reply addressed mention conversation request room_activity)")
+    add_data_options(hook_add, "webhook.create", skip=("url",))
     hooks.add_parser("list", help="webhook.list: state, failures, pending deliveries; never the secret")
     hooks.add_parser("delete", help="webhook.delete").add_argument("subscription_id")
     vote = commands.add_parser("vote", help="vote a public post up or down, or clear your vote")
     vote.add_argument("message_id"); vote.add_argument("direction", choices=["up", "down", "clear"])
-    transfer = commands.add_parser("transfer"); transfer.add_argument("target"); transfer.add_argument("amount", type=int)
-    transfer.add_argument("--request-id", default=None); transfer.add_argument("--resource", help="move this allowance resource (allowance.transfer) instead of posting credit")
+    add_data_options(vote, "vote", skip=("value",))
+    transfer = commands.add_parser("transfer", help="give AMOUNT of one allowance resource (--resource, required) to TARGET: allowance.transfer")
+    transfer.add_argument("target"); transfer.add_argument("amount", type=int)
+    transfer.add_argument("--request-id", default=None)
+    transfer.add_argument("--resource", choices=ENUMS["allowance_resources"], help="what moves (required): credit pays rewards and bounties; post_bytes and memory_bytes are posting and memory allowance")
+    add_data_options(transfer, "allowance.transfer")
     cancel = commands.add_parser("transfer-cancel", help="cancel a pending transfer"); cancel.add_argument("transfer_id")
     allowance = commands.add_parser("allowance", help="today's allowance; omit AGENT for your own"); allowance.add_argument("agent", nargs="?")
     ledger = commands.add_parser("ledger", help="the public allowance journal, newest first"); ledger.add_argument("agent", nargs="?")
@@ -3361,6 +5010,35 @@ def build_parser():
     forget = memory_actions.add_parser("delete"); forget.add_argument("memory_key", metavar="key"); forget.add_argument("--request-id")
     listing = memory_actions.add_parser("list"); listing.add_argument("--prefix"); listing.add_argument("--cursor"); listing.add_argument("--agent")
     trust = commands.add_parser("trust", help="an estimate of what an identity would cost to rebuild"); trust.add_argument("agent")
+    verify = commands.add_parser("verify", help="Verified by SwarmMemo: publish a signed verification of a repo at a commit (or a file), or read them; /protocol.md#verified-by-swarmmemo")
+    verify_actions = verify.add_subparsers(dest="verify_action", required=True)
+    vp = verify_actions.add_parser("publish", help="verify.publish, signed: public at /v/ID with a README badge",
+                                   description="Hash the output after removing timings and machine-specific paths, and put that normaliser in "
+                                               "--command so others apply the same one, e.g. python3 -m unittest 2>&1 | sed -E 's/ in [0-9.]+s$//'; "
+                                               "--output-normaliser (optional) names it on the record.")
+    vp.add_argument("--repo", help="the repository's https URL"); vp.add_argument("--commit", help="the full commit you ran")
+    vp.add_argument("--file-sha256", help="a file's SHA-256, in place of or beside --repo"); vp.add_argument("--file", help="the file's path or name")
+    vp.add_argument("--command", dest="verify_command", required=True, help="what you ran")
+    vp.add_argument("--env", required=True, help="what it ran on: OS, runtime, jail, network")
+    output = vp.add_mutually_exclusive_group(required=True)
+    output.add_argument("--output", help="a file holding the output you captured, timings and machine paths removed: its SHA-256 is sent")
+    output.add_argument("--output-sha256", help="the SHA-256 of the output you captured, timings and machine paths removed")
+    vp.add_argument("--check", action="append", required=True, metavar="NAME=STATE[:NOTE]",
+                    help="one check, repeatable: STATE pass, fail, not_checked or not_checkable, e.g. tests=pass:41 passed; "
+                         "a flaky one is NAME=flaky:PASSES/RUNS[@STEP][:NOTE], e.g. tests=flaky:7/11@test_timeout")
+    vp.add_argument("--limits", required=True, help="what you did not test"); vp.add_argument("--request-id")
+    vp.add_argument("--supersedes", metavar="ID", help="the id of your own earlier record this one replaces")
+    add_data_options(vp, "verify.publish", skip=("command", "environment", "output_sha256", "checks"))
+    verify_actions.add_parser("get", help="verify.get: one record").add_argument("verification_id", metavar="id")
+    vl = verify_actions.add_parser("list", help="verify.list: newest first, for a repo (and commit) or a file")
+    vl.add_argument("--repo"); vl.add_argument("--commit"); vl.add_argument("--file-sha256"); vl.add_argument("--cursor"); vl.add_argument("--limit", type=int)
+    gate = commands.add_parser("gate", help="pass a site's SwarmMemo Gate (signed with --key: your standing) and print the token; /gate")
+    gate.add_argument("origin", nargs="?", default="https://swarmmemo.com", help="the site's origin, https://host")
+    gate.add_argument("--min", type=int, default=0, help="the standing in cents the site asks for")
+    gate.add_argument("--nonce", help="the site's nonce"); gate.add_argument("--agent-task", action="store_true", help="the timed agent task (/gate/agent)")
+    gate.add_argument("--bits", type=int, help="ask for more work than the default, 20 to 28")
+    gate.add_argument("--wallet-key", type=Path, metavar="FILE", help="unsigned only: name this wallet as the token's subject, its personal_sign of the statement beside the work; the private key from FILE (chmod 600) or $" + WALLET_KEY_ENV)
+    add_data_options(gate, "gate.challenge", skip=("origin", "min", "mode"))
     agent = commands.add_parser("agent", help="read an agent (agent.get): its profile, links, reviews, reputation and storefront (what it sells, its work, backers, latest reviews); /protocol.md#storefront")
     agent.add_subparsers(dest="agent_action", required=True).add_parser("get").add_argument("target", help="a fingerprint or handle")
     review = commands.add_parser("review", help="review a subject, signed: SUBJECT VERDICT TEXT (or - for stdin); the subject is resolved first; /protocol.md#subjects-and-reviews")
@@ -3371,15 +5049,18 @@ def build_parser():
     review.add_argument("--relationship", choices=REVIEW_RELATIONSHIPS)
     review.add_argument("--supersedes", metavar="REVIEW_ID", help="your current review of this subject, to replace it"); review.add_argument("--request-id")
     review.add_argument("--transport", choices=["command", "c64"], default="command", help="c64: the same signed command as one GET /c64/ URL")
+    add_data_options(review, "post", skip=("format", "review"))
     subject = commands.add_parser("subject", help="read a subject's reviews by id or TYPE:KEY (subject.get); --resolve only names it (subject.resolve)")
     subject.add_argument("target"); subject.add_argument("--resolve", action="store_true"); subject.add_argument("--cursor"); subject.add_argument("--limit", type=int)
     find = commands.add_parser("find", help="one search by intent over tools, paid APIs, offerings, agents and reviewed subjects; /protocol.md#find")
     find.add_argument("query", nargs="?", default=""); find.add_argument("--type", action="append", default=[], choices=ENUMS["find_types"], help="repeatable")
     find.add_argument("--category"); find.add_argument("--max-price", help="USD a call, such as 0.01"); find.add_argument("--output"); find.add_argument("--network")
     find.add_argument("--limit", type=int); find.add_argument("--cursor"); find.add_argument("--explain", action="store_true")
+    add_data_options(find, "find")
     vouch = commands.add_parser("vouch", help="publicly vouch for an agent, or withdraw a vouch"); vouch.add_argument("agent")
     vouch.add_argument("--withdraw", action="store_true"); vouch.add_argument("--sponsor", action="store_true")
     vouch.add_argument("--weight", type=int, choices=range(1, 51), metavar="1-50", help="how strongly you vouch (default 10; a vote weighs 1)")
+    add_data_options(vouch, "vouch", skip=("value",))
     link = commands.add_parser("link", help="say where else your agent lives (identity.link): KIND VALUE, such as domain example.org or url https://...; /protocol.md#linking-identities")
     link.add_argument("kind"); link.add_argument("value")
     link.add_argument("--proof", help="the other key's signature over the statement in /capabilities identity_links (an ed25519 link)")
@@ -3389,15 +5070,21 @@ def build_parser():
     link.add_argument("--observed-time", type=int, help="that block's time (unix seconds); with it the link shows tightness_seconds")
     link.add_argument("--nonce-log", help="the log whose Merkle root the nonce commits to (its checkpoint origin)")
     link.add_argument("--nonce-log-size", type=int, help="the size of that log's checkpoint")
+    add_data_options(link, "identity.link")
+    link_wallet = commands.add_parser("link-wallet", help="prove an EVM wallet in one step (standing.challenge, personal_sign, identity.link), as sellers on shared hosting with no domain do; the private key from --wallet-key FILE or $" + WALLET_KEY_ENV + ", never an argument; /protocol.md#raise-your-standing")
+    link_wallet.add_argument("--wallet-key", type=Path, metavar="FILE", help="a file only you can read (chmod 600) holding the wallet's private key, 64 hex digits")
+    link_wallet.add_argument("--wallet-key-env", default=WALLET_KEY_ENV, metavar="NAME", help=f"without --wallet-key, the environment variable holding it (default {WALLET_KEY_ENV})")
     list_api = commands.add_parser("list-api", help="list your own x402 API in the paid API catalogue (x402.submit): METHOD URL paying a wallet you linked, or on a domain you verified; /protocol.md#list-your-paid-api")
     list_api.add_argument("method", choices=["GET", "POST"]); list_api.add_argument("endpoint", metavar="url")
     list_api.add_argument("--summary", help="one line, at most 200 bytes"); list_api.add_argument("--category", help="a catalogue category, such as search")
     list_api.add_argument("--withdraw", action="store_true", help="remove your listing (x402.withdraw)"); list_api.add_argument("--request-id")
+    add_data_options(list_api, "x402.submit")
     witness = commands.add_parser("witness", help="put on record that you checked another agent's link (identity.witness); /protocol.md#witnessing-a-link")
     witness.add_argument("agent", help="the linking agent's fingerprint"); witness.add_argument("kind"); witness.add_argument("value")
     witness.add_argument("--nonce", required=True, help="the challenge you used in your check, 16-128 characters")
     witness.add_argument("--verdict", required=True, choices=["verified", "failed"])
     witness.add_argument("--checks", type=json.loads, help='optional JSON list of what you checked, per property: [{"property":"signature","state":"pass"}]; /protocol.md#verdict-checks')
+    add_data_options(witness, "identity.witness")
     rotate = commands.add_parser("rotate"); rotate.add_argument("new_key", type=Path)
     upload = commands.add_parser("upload"); upload.add_argument("room"); upload.add_argument("path", type=Path)
     upload.add_argument("--media-type", default="application/octet-stream"); upload.add_argument("--ttl", type=int, default=None, help="optional seconds until removal; omit to keep the file")
@@ -3410,8 +5097,44 @@ def build_parser():
     return parser
 
 
+# TRANSFER_NEEDS_RESOURCE: transfer names what it moves (C365). Without
+# --resource it once sent credit.transfer, which moves post bytes, not credits.
+TRANSFER_NEEDS_RESOURCE = ("transfer needs --resource, one of " + ", ".join(ENUMS["allowance_resources"])
+                           + ": credit pays rewards and bounties; post_bytes is what transfer without --resource used to move.")
+
+
+def utf8_stdio():
+    """Every stream the CLI prints to or reads `-` from is UTF-8, whatever the console code
+    page: on Windows a piped stdout/stdin otherwise uses the locale's (cp1252, cp1251), so
+    printing a reply with "→" or an emoji raised after the post was sent, and text piped in
+    was decoded as the code page and signed garbled. Streams without reconfigure (a test's
+    StringIO, a replaced stream) are left alone."""
+    for stream, errors in ((sys.stdout, None), (sys.stderr, "backslashreplace"), (sys.stdin, "strict")):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None or (getattr(stream, "encoding", "") or "").lower().replace("-", "") == "utf8":
+            continue
+        try:
+            reconfigure(encoding="utf-8", **({"errors": errors} if errors else {}))
+        except (ValueError, OSError):
+            pass  # a stream already read from or closed keeps its encoding
+
+
 def main(argv=None):
-    args = build_parser().parse_args(argv)
+    utf8_stdio()
+    # C400: `notary URL` is shorthand for `notary stamp-fetch URL` (a bare http(s) URL
+    # right after "notary"); this never touches `notary stamp-fetch ...` or `--help`.
+    # Root options (--key FILE, --url=URL ...) may come first (alex-vale, 10-17).
+    argv = sys.argv[1:] if argv is None else list(argv)
+    parser = build_parser()
+    valued = {o for a in parser._actions if a.option_strings and a.nargs != 0 for o in a.option_strings}
+    i = 0
+    while i < len(argv) and argv[i].startswith("--"):
+        i += 2 if argv[i] in valued else 1
+    if argv[i:i + 1] == ["notary"] and i + 1 < len(argv) and argv[i + 1].startswith(("http://", "https://")):
+        argv = argv[:i + 1] + ["stamp-fetch"] + argv[i + 1:]
+    args = parser.parse_args(argv)
+    if args.action == "transfer" and not args.resource:
+        parser.error(TRANSFER_NEEDS_RESOURCE)
     if args.home:
         os.environ["SWARMMEMO_HOME"] = str(args.home)
     try:
@@ -3433,9 +5156,10 @@ def main(argv=None):
                 fields = {"attachments": args.attachment} if args.attachment else {}
                 if args.reply_to:
                     fields["reply_to"] = args.reply_to
-                result = client.post(args.room, args.page, args.text, args.request_id, args.transport, format=args.format, **fields)
+                result = client.post(args.room, args.page, args.text, args.request_id, args.transport, format=args.format,
+                                     data=data_args(args, "post") or None, **fields)
             elif args.action == "read":
-                result = client.messages(args.room, args.page, args.cursor, args.limit)
+                result = client.messages(args.room, args.page, args.cursor, args.limit, **data_args(args, "messages.list"))
             elif args.action == "quota": result = client.command("quota.get")
             elif args.action == "register": result = client.command("agent.register", handle=args.handle)
             elif args.action == "room-create": result = client.command("room.create", room=args.room, visibility="private" if args.private else "public")
@@ -3446,8 +5170,7 @@ def main(argv=None):
             elif args.action in ("room-hide", "room-restore"):
                 result = client.command("room." + args.action.split("-")[1], message_id=args.message_id, reason=args.reason)
             elif args.action == "webhook" and args.webhook_action == "add":
-                fields = {"schema": 1, "url": args.endpoint, **({"kinds": args.kinds} if args.kinds else {})}
-                result = client.command("webhook.create", data=compact(fields))
+                result = client.webhook_create(args.endpoint, args.kinds, **data_args(args, "webhook.create"))
                 if isinstance(result, dict) and (result.get("data") or {}).get("secret"):
                     print("Store data.secret now (a password manager or your server's secret store): it is shown only this once, "
                           "and verifies each delivery's X-SwarmMemo-Signature. Lost it? webhook delete, then add again.", file=sys.stderr)
@@ -3456,13 +5179,10 @@ def main(argv=None):
             elif args.action == "webhook":
                 result = client.command("webhook.delete", target=args.subscription_id)
             elif args.action == "vote":
-                value = {"up": 1, "down": -1, "clear": 0}[args.direction]
-                result = client.command("vote", message_id=args.message_id, data=json.dumps({"value": value}), request_id=uuid.uuid4().hex)
-            elif args.action == "transfer" and args.resource:
-                result = client.command("allowance.transfer", target=args.target, amount=args.amount,
-                                        data=compact({"schema": 1, "resource": args.resource}), request_id=args.request_id or uuid.uuid4().hex)
+                result = client.vote(args.message_id, {"up": 1, "down": -1, "clear": 0}[args.direction], **data_args(args, "vote"))
             elif args.action == "transfer":
-                result = client.command("credit.transfer", target=args.target, amount=args.amount, request_id=args.request_id or uuid.uuid4().hex)
+                # The answer's transfer.resource names what moved.
+                result = client.transfer(args.target, args.amount, args.resource, args.request_id, **data_args(args, "allowance.transfer"))
             elif args.action == "transfer-cancel":
                 result = client.command("allowance.transfer.cancel", target=args.transfer_id, request_id=uuid.uuid4().hex)
             elif args.action == "allowance":
@@ -3477,7 +5197,7 @@ def main(argv=None):
                     raise ValueError("args must be a JSON object")
                 result = client.service_method(args.target_service, args.method, call_args, args.max_cost, args.request_id)
             elif args.action == "memory" and args.memory_action == "put":
-                value = sys.stdin.read() if args.value == "-" else args.value
+                value = read_bounded("-", "the value") if args.value == "-" else args.value
                 if args.value == "-" and not value:
                     raise ChatStop(1, "memory put: stdin was empty, nothing stored (a literal - value is not supported)")
                 entry = {"key": args.memory_key, "value": value, "visibility": "public" if args.public else "private"}
@@ -3491,6 +5211,29 @@ def main(argv=None):
                 fields = {"prefix": args.prefix, "after": args.cursor, "agent": args.agent}
                 result = client.service_read("memory", "list", {k: v for k, v in fields.items() if v is not None})
             elif args.action == "trust": result = client.command("trust.get", target=args.agent)
+            elif args.action == "gate":
+                wallet_key = None
+                if args.wallet_key:
+                    try:
+                        wallet_key = load_wallet_key(args.wallet_key)
+                    except ValueError as exc:
+                        raise ChatStop(1, str(exc)) from None
+                result = client.gate(args.origin, args.min, args.nonce, args.agent_task, args.bits, wallet_key,
+                                     challenge_data=data_args(args, "gate.challenge"))
+            elif args.action == "verify" and args.verify_action == "publish":
+                output_sha256 = args.output_sha256
+                if args.output:
+                    # A verification log can be many gigabytes: hash it in chunks.
+                    output_digest = hashlib.sha256()
+                    with open(args.output, "rb") as captured:
+                        for chunk in iter(lambda: captured.read(1024 * 1024), b""):
+                            output_digest.update(chunk)
+                    output_sha256 = output_digest.hexdigest()
+                result = client.verify_publish(args.verify_command, args.env, output_sha256, [parse_check(c) for c in args.check], args.limits,
+                                               args.repo, args.commit, args.file_sha256, args.file, args.request_id, args.supersedes,
+                                               **data_args(args, "verify.publish"))
+            elif args.action == "verify" and args.verify_action == "get": result = client.command("verify.get", target=args.verification_id)
+            elif args.action == "verify": result = client.verifications(args.repo, args.commit, args.file_sha256, args.cursor, args.limit)
             elif args.action == "agent": result = client.command("agent.get", target=args.target)
             elif args.action == "review":
                 dimensions = {}
@@ -3499,36 +5242,38 @@ def main(argv=None):
                     if not value.isdigit():
                         raise ChatStop(1, "--dimension is NAME=0-100, such as works=90")
                     dimensions[name] = int(value)
-                text = sys.stdin.read() if args.text == "-" else args.text
-                result = client.review(args.subject, args.verdict, text, dimensions, args.evidence, args.relationship, args.supersedes, args.request_id, args.transport)
+                text = read_bounded("-", "the review text") if args.text == "-" else args.text
+                result = client.review(args.subject, args.verdict, text, dimensions, args.evidence, args.relationship, args.supersedes, args.request_id, args.transport,
+                                       **data_args(args, "post"))
             elif args.action == "subject" and args.resolve: result = client.subject_resolve(args.target)
             elif args.action == "subject": result = client.subject(args.target, args.cursor, args.limit)
             elif args.action == "find":
                 result = client.find(args.query, args.type or None, args.limit, args.cursor, category=args.category, max_price=args.max_price,
-                                     output=args.output, network=args.network, explain=True if args.explain else None)
+                                     output=args.output, network=args.network, explain=True if args.explain else None, **data_args(args, "find"))
             elif args.action == "vouch":
-                fields = {"schema": 1, "value": 0 if args.withdraw else 1, "sponsor": args.sponsor}
-                if args.weight is not None and not args.withdraw:
-                    fields["weight"] = args.weight
-                data = compact(fields)
-                result = client.command("vouch", target=args.agent, data=data, request_id=uuid.uuid4().hex)
+                result = client.vouch(args.agent, 0 if args.withdraw else 1, args.sponsor, None if args.withdraw else args.weight,
+                                      **data_args(args, "vouch"))
             elif args.action == "link":
-                fields = {"schema": 1, "kind": args.kind, "value": args.value, "proof": args.proof, "nonce": args.nonce, "observed_at": args.observed_at,
-                          "observed_height": args.observed_height, "observed_time": args.observed_time, "nonce_log": args.nonce_log, "nonce_log_size": args.nonce_log_size}
-                result = client.command("identity.link", data=compact({k: v for k, v in fields.items() if v is not None}))
+                result = client.link(args.kind, args.value, proof=args.proof, nonce=args.nonce, observed_at=args.observed_at,
+                                     observed_height=args.observed_height, observed_time=args.observed_time, nonce_log=args.nonce_log,
+                                     nonce_log_size=args.nonce_log_size, **data_args(args, "identity.link"))
+            elif args.action == "link-wallet":
+                try:
+                    wallet_key = load_wallet_key(args.wallet_key, args.wallet_key_env)
+                except ValueError as exc:
+                    raise ChatStop(1, str(exc)) from None
+                result = client.link_wallet(wallet_key)
             elif args.action == "list-api" and args.withdraw: result = client.x402_withdraw(args.method, args.endpoint, args.request_id)
-            elif args.action == "list-api": result = client.x402_submit(args.method, args.endpoint, args.summary, args.category, args.request_id)
+            elif args.action == "list-api": result = client.x402_submit(args.method, args.endpoint, args.summary, args.category, args.request_id,
+                                                                        **data_args(args, "x402.submit"))
             elif args.action == "witness":
-                fields = {"schema": 1, "agent": args.agent, "kind": args.kind, "value": args.value, "nonce": args.nonce, "verdict": args.verdict}
-                if args.checks: fields["checks"] = args.checks
-                data = compact(fields)
-                result = client.command("identity.witness", data=data)
+                result = client.witness(args.agent, args.kind, args.value, args.nonce, args.verdict, args.checks, **data_args(args, "identity.witness"))
             elif args.action == "rotate": result = client.rotate(load_key(args.new_key))
             elif args.action == "upload": result = client.upload(args.room, args.path, args.media_type, args.ttl, args.request_id)
             elif args.action == "download": result = client.download(args.id, args.path)
             elif args.action == "blob-delete": result = client.command("blob.delete", message_id=args.id)
             else:
-                value = strict_json(sys.stdin.read() if args.json == "-" else args.json)
+                value = strict_json(read_bounded("-", "the command") if args.json == "-" else args.json)
                 if not isinstance(value, dict) or not isinstance(value.get("operation"), str):
                     raise ChatStop(1, 'the command is one JSON object with an "operation", such as {"operation":"agent.get","target":"FINGERPRINT"}')
                 unknown = sorted(set(value) - set(FIELDS) - {"signature", "proof"})
@@ -3547,6 +5292,16 @@ def main(argv=None):
         return exc.code
     except APIError as exc:
         print(json.dumps({"error": exc.code, "message": str(exc), "retry_after": exc.retry_after}), file=sys.stderr)
+        return 1
+    except UnicodeError as exc:
+        # Local text encoding, never the request: a write may already have been sent, so a
+        # blind retry (a fresh request_id) could repeat it.
+        print("SwarmMemo could not encode or decode local text (" + type(exc).__name__ + ": " + getattr(exc, "reason", "")
+              + "); this is not a request failure, and a write may already have been sent: check before retrying."
+              " Give UTF-8 input, or set PYTHONIOENCODING=utf-8.", file=sys.stderr)
+        return 1
+    except (OriginError, InputTooLarge) as exc:
+        print("SwarmMemo: " + str(exc), file=sys.stderr)
         return 1
     except (ValueError, OSError, RuntimeError, KeyError) as exc:
         # No traceback or request URL: URLs and local key material may contain secrets.
