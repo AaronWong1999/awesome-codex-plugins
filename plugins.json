@@ -3,7 +3,7 @@
   "name": "awesome-codex-plugins",
   "version": "1.0.0",
   "last_updated": "2026-10-18",
-  "total": 307,
+  "total": 308,
   "categories": [
     "Development & Workflow",
     "Tools & Integrations"
@@ -2308,6 +2308,16 @@
       "category": "Tools & Integrations",
       "source": "awesome-codex-plugins",
       "install_url": "https://raw.githubusercontent.com/kreuzberg-dev/plugins/HEAD/plugins/crawlberg/.codex-plugin/plugin.json"
+    },
+    {
+      "name": "Krexa",
+      "url": "https://github.com/Krexa-xyz/skills",
+      "owner": "Krexa-xyz",
+      "repo": "skills",
+      "description": "Turn a trading idea, post or video into fixed rules, backtest and paper-trade them for free, and request a live trading agent on Binance, Coinbase, Kraken, OKX, Bybit, MEXC, Hyperliquid, Polymarket or Solana DEXs that you approve and sign, through Krexa's hosted MCP server.",
+      "category": "Tools & Integrations",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/Krexa-xyz/skills/HEAD/.codex-plugin/plugin.json"
     },
     {
       "name": "Kuudo Skills",

@@ -3411,6 +3411,21 @@
       "icon": "./plugins/kreuzberg-dev/plugins/plugins/crawlberg/assets/icon.svg"
     },
     {
+      "name": "krexa",
+      "displayName": "Krexa",
+      "source": {
+        "source": "local",
+        "path": "./plugins/Krexa-xyz/skills"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Turn a trading idea, post or video into fixed rules, backtest and paper-trade them for free, and request a live trading agent on Binance, Coinbase, Kraken, OKX, Bybit, MEXC, Hyperliquid, Polymarket or Solana DEXs that you approve and sign, through Krexa's hosted MCP server.",
+      "icon": "./plugins/Krexa-xyz/skills/assets/icon.png"
+    },
+    {
       "name": "kuudo-skills",
       "displayName": "Kuudo Skills",
       "source": {
