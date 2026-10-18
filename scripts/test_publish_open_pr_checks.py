@@ -46,7 +46,7 @@ class CentralizedPublisherTests(unittest.TestCase):
                 conclusion, title, summary = PUBLISHER.check_summary(self.scan_result, jobs)
                 self.assertEqual(conclusion, "failure")
                 self.assertIn("score not established", title.lower())
-                self.assertIn("at least 80", summary)
+                self.assertIn("at least 80/100", summary)
 
     def test_scan_comments_are_single_paragraphs_and_recommend_optional_source_ci(self) -> None:
         for jobs in ({12: ["success"]}, {12: ["failure"]}):
