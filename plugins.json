@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "name": "awesome-codex-plugins",
   "version": "1.0.0",
-  "last_updated": "2026-10-18",
+  "last_updated": "2026-10-19",
   "total": 310,
   "categories": [
     "Development & Workflow",
@@ -2070,16 +2070,6 @@
       "install_url": "https://raw.githubusercontent.com/entropy-data/dataproduct-builder-dbt/HEAD/.codex-plugin/plugin.json"
     },
     {
-      "name": "Datacircle",
-      "url": "https://github.com/waynehamadi/datacircle-plugin",
-      "owner": "waynehamadi",
-      "repo": "datacircle-plugin",
-      "description": "Query your favorite B2B data APIs through us. Same request, same price, no markup.",
-      "category": "Tools & Integrations",
-      "source": "awesome-codex-plugins",
-      "install_url": "https://raw.githubusercontent.com/waynehamadi/datacircle-plugin/HEAD/.codex-plugin/plugin.json"
-    },
-    {
       "name": "deja",
       "url": "https://github.com/vshulcz/deja-vu",
       "owner": "vshulcz",
@@ -2688,6 +2678,16 @@
       "category": "Tools & Integrations",
       "source": "awesome-codex-plugins",
       "install_url": "https://raw.githubusercontent.com/tim-osterhus/codex-remotion-plugin/HEAD/.codex-plugin/plugin.json"
+    },
+    {
+      "name": "Remove AI Watermarks",
+      "url": "https://github.com/wiltodelta/remove-ai-watermarks",
+      "owner": "wiltodelta",
+      "repo": "remove-ai-watermarks",
+      "description": "Identify and remove AI watermarks and provenance metadata (Gemini and Veo marks, SynthID, C2PA, EXIF) in images and video you generated yourself, plus provenance metadata in audio.",
+      "category": "Tools & Integrations",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/wiltodelta/remove-ai-watermarks/HEAD/.codex-plugin/plugin.json"
     },
     {
       "name": "Resume Tailor",

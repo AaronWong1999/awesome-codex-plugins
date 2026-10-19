@@ -3056,21 +3056,6 @@
       "description": "Full data-product lifecycle on dbt for Entropy Data: scaffold, audit, and integrate projects with ODCS, ODPS, OpenLineage, and GitHub Actions."
     },
     {
-      "name": "datacircle",
-      "displayName": "Datacircle",
-      "source": {
-        "source": "local",
-        "path": "./plugins/waynehamadi/datacircle-plugin"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Tools & Integrations",
-      "description": "Query your favorite B2B data APIs through us. Same request, same price, no markup.",
-      "icon": "./plugins/waynehamadi/datacircle-plugin/assets/logo.png"
-    },
-    {
       "name": "deja-vu",
       "displayName": "deja",
       "source": {
@@ -3969,6 +3954,21 @@
       "category": "Tools & Integrations",
       "description": "Build parameterized Remotion videos in Codex with the official Remotion docs MCP, composition scaffolding, and a data-driven launch-video workflow.",
       "icon": "./plugins/tim-osterhus/codex-remotion-plugin/assets/remotion-composer-icon.svg"
+    },
+    {
+      "name": "remove-ai-watermarks",
+      "displayName": "Remove AI Watermarks",
+      "source": {
+        "source": "local",
+        "path": "./plugins/wiltodelta/remove-ai-watermarks"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Identify and remove AI watermarks and provenance metadata (Gemini and Veo marks, SynthID, C2PA, EXIF) in images and video you generated yourself, plus provenance metadata in audio.",
+      "icon": "./plugins/wiltodelta/remove-ai-watermarks/assets/icon.svg"
     },
     {
       "name": "resume-tailor",
