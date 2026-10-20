@@ -214,6 +214,21 @@
       "icon": "./plugins/AgiFlow/ai-plugin/assets/icon.png"
     },
     {
+      "name": "ai-sdlc",
+      "displayName": "AI-Native SDLC Loop",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ghiaog123/ai-native-sdlc"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Development & Workflow",
+      "description": "Six-stage SDLC in committed Markdown where hooks enforce the loop at the tool-call level: an artifact gate refuses source writes no approved plan covers and keeps a change declared low-risk away from sensitive paths, with 8 skills and 2 read-only subagents.",
+      "icon": "./plugins/ghiaog123/ai-native-sdlc/assets/icon.svg"
+    },
+    {
       "name": "aiboarding",
       "displayName": "AIBoarding",
       "source": {

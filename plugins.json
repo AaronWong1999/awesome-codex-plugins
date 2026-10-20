@@ -3,7 +3,7 @@
   "name": "awesome-codex-plugins",
   "version": "1.0.0",
   "last_updated": "2026-10-20",
-  "total": 313,
+  "total": 314,
   "categories": [
     "Development & Workflow",
     "Tools & Integrations"
@@ -148,6 +148,16 @@
       "category": "Development & Workflow",
       "source": "awesome-codex-plugins",
       "install_url": "https://raw.githubusercontent.com/AgiFlow/ai-plugin/HEAD/.codex-plugin/plugin.json"
+    },
+    {
+      "name": "AI-Native SDLC Loop",
+      "url": "https://github.com/ghiaog123/ai-native-sdlc",
+      "owner": "ghiaog123",
+      "repo": "ai-native-sdlc",
+      "description": "Six-stage SDLC in committed Markdown where hooks enforce the loop at the tool-call level: an artifact gate refuses source writes no approved plan covers and keeps a change declared low-risk away from sensitive paths, with 8 skills and 2 read-only subagents.",
+      "category": "Development & Workflow",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/ghiaog123/ai-native-sdlc/HEAD/plugins/ai-sdlc/.codex-plugin/plugin.json"
     },
     {
       "name": "AIBoarding",
