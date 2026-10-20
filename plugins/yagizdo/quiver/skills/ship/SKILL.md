@@ -1,6 +1,6 @@
 ---
 name: ship
-description: "Run a project in phases. The first /ship asks one batch of project questions, proposes a split into phases, and on one approval saves a roadmap, a decision log, and one file per phase under .claude/ship/. Each later /ship runs the next phase end to end -- its questions, research, a spec and a plan written without approval prompts, the build through /work --auto, build, test, and smoke checks, /quiver:review, an automatic fix of the findings the review confirmed, and a plain-language report. Every stage is saved in the phase file, so /clear then /ship continues where a run stopped. Nothing is pushed and no pull request is opened."
+description: "Run a project in phases. The first /ship asks one batch of project questions, proposes a split into phases, and on one approval saves a roadmap, a decision log, and one file per phase under .claude/ship/, then starts the first phase. Each phase runs end to end -- its questions, research, a spec and a plan written without approval prompts, the build through /work --auto, build, test, and smoke checks, /quiver:review, an automatic fix of the findings the review confirmed, and a plain-language report -- and a finished phase starts the next ready one in the same run. The run ends at a stopped phase or when you choose a fresh session. Every stage is saved in the phase file, so /clear then /ship continues where a run stopped. Nothing is pushed and no pull request is opened."
 argument-hint: "[<phase-id>] [--seed <spec.md>] [--verify]"
 when-to-use: "user wants to build a project in phases or run its next phase -- '/ship', 'split this project into phases', 'start the next phase', 'build this app', 'I described my project, now build it', 'continue the phase', 'verify my build' (not: gap-analysis on existing partial code; not: executing a plan you already have -- use '/work' for that)"
 ---
@@ -31,7 +31,7 @@ when-to-use: "user wants to build a project in phases or run its next phase -- '
 
 # Instructions
 
-You are a phase conductor. The first `/ship` in a project splits the work into phases; every later `/ship` runs one phase from its questions to its final report. Each stage of a phase writes its result and the next stage to the phase file before the next one starts, so a later `/ship` -- in this session or after `/clear` -- continues from disk, never from memory. You do NOT guess requirements: a detail that changes what gets built and that no answer or recorded decision settles is asked.
+You are a phase conductor. The first `/ship` in a project splits the work into phases and starts the first one. A phase runs from its questions to its final report, and a phase that finishes `done` starts the next ready phase in the same turn, so one `/ship` carries the project as far as it can go without the user. Each stage of a phase writes its result and the next stage to the phase file before the next one starts, so a later `/ship` -- in this session or after `/clear` -- continues from disk, never from memory. You do NOT guess requirements: a detail that changes what gets built and that no answer or recorded decision settles is asked.
 
 Ship implements nothing itself. `/work` writes the code and the fixes, `/quiver:review` reviews the branch, and ship reads other skills' steps by path and copies no format or check of theirs. The only agents ship dispatches are read-only: `quiver:code-navigator` and `quiver:stack-researcher` before the spec, and one plan reviewer after the plan. Ship runs no push, opens no pull request, and posts no comment. It asks only at the points this file names: the project questions and the phase approval in `# Init`, the phase questions, at most one more batch after research, the fresh-session question when it recommends one, and the stop for a Critical finding or a behavior change in the fix stage. `/work` and `/quiver:review` keep their own stops -- a blocker, a merge conflict, an unaddressed Critical finding -- and those questions are the user's: ship never answers them on the user's behalf and never grants a fix attempt past `/work`'s cap.
 
@@ -95,7 +95,7 @@ Print one line when resuming: `> Picking up phase <id> (<name>) where the last r
 
 All three live under `.claude/ship/` at the project root. Before the first write into `.claude/ship/`, apply the keep-local rule in `skills/local-files/SKILL.md` (its `## Keep-Local Rule`). Each write is followed by a read-back (L3).
 
-**Status values:** `pending`, `in-progress`, `done`, `blocked`. A phase is `done` only with evidence: the verify-stage evidence lines and the verdict of its last review, as the done stage states. A false "done" costs more than a false "in progress".
+**Status values:** `pending`, `in-progress`, `done`, `blocked`. A phase is `done` only with evidence: the verify-stage evidence lines and the Criticals of its reviews, as the done stage states. A false "done" costs more than a false "in progress".
 
 **Stage values:** `questions`, `research`, `questions-2`, `spec`, `plan`, `split`, `build`, `verify`, `review`, `fix`, `done`. Stage names are written to the phase file only; no status line or question names one.
 
@@ -185,7 +185,7 @@ Out of scope: <what it does not build -- at least the later phases' work>
 
 # Init
 
-Runs once per project, when Step 1 finds no roadmap. It splits the project into phases and builds nothing.
+Runs once per project, when Step 1 finds no roadmap. It splits the project into phases, and Init 4 then starts the first one.
 
 ## Init 1 -- Read what exists
 
@@ -223,10 +223,10 @@ Present the split as a table:
 
 Each phase has 2-5 done criteria that a command or a check can show, and an out-of-scope line that names at least the later phases' work -- with one phase, at least one thing the project does not build. A small project gets one phase. Then ask one `AskUserQuestion`:
 
-> Here is how I would split the project. Approving saves the phases; nothing is built until you run /ship again.
+> Here is how I would split the project. Approving saves the phases and starts the first one.
 
 Options:
-- "Approve -- save the phases" -- Saves the roadmap and one file per phase; the next /ship starts the first phase.
+- "Approve -- save the phases" -- Saves the roadmap and one file per phase, and starts the first phase now.
 - "Change something" -- You say what to change; I redraw the table and ask again.
 - "Start over" -- Drops this split and asks the project questions again.
 
@@ -240,7 +240,7 @@ Get the date with the Bash tool (`date '+%Y-%m-%d'`). Before the first write int
 - `.claude/ship/decisions.md`, each project-level answer as one `D<n>` entry with `(user, <date>, phase init)`, the resolved `test_command`, `build_command`, and `run_command` among them.
 - One `.claude/ship/phases/<id>-<slug>.md` per phase, with `status: pending` and `stage: questions`, its goal, scope, and done criteria from the approved table.
 
-Read each file back (L3). Print `> Saved <N> phases under .claude/ship/. First: phase <id> -- <name>. Run /ship to start it.` and terminate.
+Read each file back (L3). Print `> Saved <N> phases under .claude/ship/. Starting phase <id> -- <name>.` and continue in the same turn with `## Step 1 -- Route` as a bare `/ship` -- the description is not a phase id -- which picks that phase. The approval is the consent `/ship` would otherwise give for the first phase.
 
 ---
 
@@ -252,7 +252,7 @@ Every stage ends by writing the next `stage:` value and one `## Log` line (`- <Y
 
 **Starting a phase.** When the phase is `pending`, set `status: in-progress` in its file and in the roadmap row, and set the roadmap's `## Now` line. When a phase in `depends_on` has a `branch:` that is not merged into `<default branch>` (`git branch --merged <default branch>` does not list it), print `> Phase <dep id> is not merged yet, so this phase continues on the current branch, <branch>.` Ship never merges or rebases.
 
-**What starting a phase authorizes.** Running `/ship` on an approved roadmap is the consent for this phase: the spec and plan writes, the build through `/work --auto` with its per-task commits, the checks, the review, and the fix round. It does not authorize a push, a pull request, or a comment -- none of those is automatic -- and it does not stand in for a blocker: `/work` still asks when a task cannot proceed or a merge conflicts.
+**What starting a phase authorizes.** Approving the phases, or running `/ship` on an approved roadmap, is the consent for every phase the run starts: the spec and plan writes, the build through `/work --auto` with its per-task commits, the checks, the review, and the fix round. It does not authorize a push, a pull request, or a comment -- none of those is automatic -- and it does not stand in for a blocker: `/work` still asks when a task cannot proceed or a merge conflicts.
 
 ## Stage: questions
 
@@ -374,7 +374,7 @@ Write the three lines under `## Measurements` (`- <date> build: ...`, `- <date> 
 
 ## Stage: review
 
-Without git, skip this stage and the fix stage: write `stage: done` with a `## Log` line saying the branch could not be reviewed, and go to the done stage.
+Without git, or when neither `main` nor `master` resolves (the user told `/work` to create no main branch in a repository with no commit), skip this stage and the fix stage: write `stage: done` with a `## Log` line saying the branch could not be reviewed and why, and go to the done stage.
 
 Before the review writes its report, apply the keep-local rule in `skills/local-files/SKILL.md` to `.claude/reports/`: the review applies it only to its own default location, and ship names the directory explicitly below.
 
@@ -412,11 +412,15 @@ Record each answer under `## Decisions` with `(user, <date>)`. On any "Stop this
 
 **Write the fix plan** at `.claude/plans/<date>-<project>-<phase-id>-fix-plan.md` (the first free `-2`, `-3` name when taken), in the format `skills/plan/SKILL.md` Step 5 defines with its review-fix frontmatter: `review_source: <review_report path>` and `review_iteration: 1`, plus `status: active` and the `test_command`, `build_command`, and `run_command` of the phase plan. It holds only the confirmed findings to fix -- not the ones the user chose to leave -- one task per finding, each task naming the finding's report ID and title so `/work` matches it to the finding, and one acceptance criterion per finding as that step requires. Read it back (L3) and record the path in `fix_plan:`.
 
-**Hand off.** Print `> Fixing <N> confirmed problems.` Invoke the `work` skill through the Skill tool with `<fix plan path> --auto` as its arguments. `/work` detects the review-fix plan by its `review_source` frontmatter and checks each finding against the report before it finishes; it keeps its own stops, and those questions are the user's. The moment `/work`'s Phase 5d summary is printed, set `fix_rounds: 1`, write `stage: verify` and its `## Log` line, and run the verify stage once more in the same turn; it continues to the review. The done stage reads the check lines of the last verify, so the fix commits are built and tested before the phase can be `done` -- a fix task `/work` accepted after three failed attempts leaves a failing test line there.
+**Hand off.** Print `> Fixing <N> confirmed problems.` Invoke the `work` skill through the Skill tool with `<fix plan path> --auto` as its arguments. `/work` detects the review-fix plan by its `review_source` frontmatter and checks each finding against the report before it finishes; it keeps its own stops, and those questions are the user's. The moment `/work`'s Phase 5d summary is printed, write the `## Log` line `fix: not fixed: <the fix-plan task numbers the summary lists as accepted after three failed attempts, blocked, failed, or not run, or none>`, set `fix_rounds: 1`, write `stage: verify` and its `## Log` line, and run the verify stage once more in the same turn; it continues to the review. The done stage reads the check lines of the last verify, so the fix commits are built and tested before the phase can be `done` -- a fix task `/work` accepted after three failed attempts leaves a failing test line there.
 
 ## Stage: done
 
-**Set the status from evidence.** Set `status: done` only when every verify line under `## Measurements` from this phase's last check is a pass or a skip, and the last review left no unaddressed Critical finding -- a Critical in its `## Findings` that the fix round did not fix and the user did not choose to leave. Otherwise set `status: blocked` with the reason (the failing check line, or the open Critical). Without git, the review did not run; the phase can still be `done` on its check lines, and the final report says it was not reviewed.
+**Set the status from evidence.** Set `status: done` only when every verify line under `## Measurements` from this phase's last check is a pass or a skip, and no Critical finding is open. Otherwise set `status: blocked` with the reason (the failing check line, or the open Critical).
+
+A Critical is one in the `## Findings` of the last review or, when `fix_plan:` is not `none`, of the first review: the report named by `review_source:` in the file at `fix_plan:`. Read both. The review after the fix round covers only the changes since the first report, so a Critical the fix round did not really fix is not in the last one. A Critical is open unless the user chose "Leave it and list it" or "I fixed it" for it under `## Decisions`. A Critical of the first review is also closed when a fix-plan task names it and the fix stage's `fix: not fixed:` line under `## Log` does not list that task; a Critical of the last review never is, since report IDs restart in every report and the review after the fix can report an incomplete fix under the same ID and title. With no such line -- the turn ended on `/work`'s summary and the next `/ship` resumed from the fix plan's status -- the Critical stays open, and the question in Step 1 settles it.
+
+Without git, the review did not run; the phase can still be `done` on its check lines, and the final report says it was not reviewed.
 
 Update the roadmap: the phase's row in `## Phases`, the `## Now` line, and the `## Next` line (the next `pending` phase whose dependencies are now `done`, or the pull request). Append to `decisions.md` every decision from this phase that applies beyond it, as `D<n>` entries with `phase <id>`. Write `stage: done` and its `## Log` line when the status is `done`. When it is `blocked`, write `stage: verify` instead, so `/ship <id>` checks the branch again and reviews the changes made since the phase stopped rather than re-reading the results that stopped it.
 
@@ -429,8 +433,8 @@ Update the roadmap: the phase's row in `## Phases`, the `## Now` line, and the `
 5. Problems the review found: the ones fixed; the ones ruled out, with one evidence line each; the ones that could not be checked, with what was tried; and any left open, with the reason. When the review did not run, say so and name the command: `/quiver:review --base <default branch> --run-checks --plan <plan path>`.
 6. What was not done or not measured: tasks `/work` reported blocked, failed, or accepted after three attempts, smoke flags, and anything the done criteria name that no check showed.
 7. That nothing was pushed and no pull request was opened.
-8. The next command: `/ship` when another phase is ready, and `/quiver:create-pr` to open the pull request for this branch. When the phase is `blocked`, `/ship <phase-id>` continues it.
+8. The next command: `/quiver:create-pr` to open the pull request for this branch. When the phase is `blocked`, `/ship <phase-id>` continues it. When the next phase starts in this run, say so instead of naming `/ship`.
 
 `/create-pr` owns the pull request for the rest of the session. When the user asks for one after the run -- 'push and open a PR', 'create the PR' -- invoke the `create-pr` skill; never run `gh pr create` from this skill or from the conversation it leaves behind. The final report is input to that skill, which reads it as something said in this conversation, not a body to hand to `gh pr create`.
 
-Read the phase file and the roadmap back (L3), and terminate.
+Read the phase file and the roadmap back (L3). **Go on to the next phase.** When the status is `done` and the roadmap has a `pending` phase whose `depends_on` phases are all `done`, print `> Phase <id> is done. Starting phase <next id> -- <name>.` and continue in the same turn with `## Step 1 -- Route` as a bare `/ship`, with no phase id or flag from this run's arguments, which picks it. Its stages measure this session again at the split, so a session that has grown full is offered a fresh one there. Otherwise terminate.

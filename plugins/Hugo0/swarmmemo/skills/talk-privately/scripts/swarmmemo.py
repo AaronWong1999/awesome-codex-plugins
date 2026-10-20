@@ -16,6 +16,7 @@ import random
 import re
 import stat
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -178,7 +179,7 @@ CONTRACT = json.loads(r"""
   "credit.transfer": {"fields":["target","amount"],"signed":true,"mutation":true,"delegable":false,"wire":"https"},
   "credits.topup": {"fields":["amount","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"payment":{"type":"string","required":false},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "credits.topups": {"fields":["cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
-  "delegation.create": {"fields":["room","target","ttl","amount","data","proof"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"disclosure":{"type":"string","required":true},"generation":{"type":"string","required":true,"pattern":"work_id"},"operations":{"type":"array","required":true},"origin":{"type":"string","required":false},"schema":{"type":"int","required":true},"spend_limit":{"type":"object","required":false}},"aliases":{},"removed":{}}},
+  "delegation.create": {"fields":["room","target","ttl","amount","data","proof"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"disclosure":{"type":"string","required":true},"generation":{"type":"string","required":true,"pattern":"work_id"},"operations":{"type":"array","required":true},"origin":{"type":"string","required":false},"payout_address":{"type":"string","required":false},"schema":{"type":"int","required":true},"spend_limit":{"type":"object","required":false}},"aliases":{},"removed":{}}},
   "delegation.get": {"fields":["target"],"signed":false,"mutation":false,"delegable":false,"wire":"https"},
   "delegation.revoke": {"fields":["target","data"],"signed":true,"mutation":true,"delegable":false,"wire":"https","data":{"fields":{"generation":{"type":"string","required":true,"pattern":"work_id"},"schema":{"type":"int","required":true}},"aliases":{},"removed":{}}},
   "delegations.list": {"fields":["cursor","limit"],"signed":true,"mutation":false,"delegable":false,"wire":"https"},
@@ -336,7 +337,7 @@ CONTRACT = json.loads(r"""
   "copies": {"required":["count","ids"],"optional":[]},
   "delegation_ack": {"required":["accepted_at","ceiling_bytes","child_id","expires_at","generation","grant_id","service_id","state"],"optional":["spend_limit"],"intent":{"spend_limit":"spend_limit"}},
   "delegation_ack_data": {"required":["ack"],"optional":[]},
-  "delegation_status": {"required":["ceiling_bytes","created_at","expires_at","generation","grant_id","remaining_bytes","service_id","state","used_bytes"],"optional":["origin","room","spend_limit"]},
+  "delegation_status": {"required":["ceiling_bytes","created_at","expires_at","generation","grant_id","remaining_bytes","service_id","state","used_bytes"],"optional":["origin","payout_address","room","spend_limit"]},
   "forwarded": {"required":["mode","origin_author","origin_id","origin_ref","origin_service"],"optional":[]},
   "message": {"required":["archive_eligible","author","created_at","hidden","id","kind","page","room","sequence","sha256","text","type","visibility"],"optional":["anon_tag","attachments","author_handle","copies","curated","custody","delegation_id","display_format","display_name_source","format","forwarded","handle","hidden_by","image_url","nickname","principal","public_key","quality","reason","reply_to","review","screen","sealed","signature","signed_payload","superseded_by","supersedes","to","via","votes","work"]},
   "message_work": {"required":["state","title","url"],"optional":["claimable","deadline","eligibility","id","result_of","reviewer","reward","reward_note","reward_state","reward_usdc","simulated","standing"]},
@@ -2038,6 +2039,10 @@ def parse_check(spec: str) -> dict:
         if not slash or not passes.strip().isdigit() or not total.strip().isdigit():
             raise ValueError(usage)
         check["runs"], check["passes"] = int(total), int(passes)
+        # Match the Go board's verification check rule before signing/sending.
+        # Flaky means there was at least one passing and one failing run.
+        if not (2 <= check["runs"] <= LIMITS["verification_check_runs_maximum"] and 0 < check["passes"] < check["runs"]):
+            raise ValueError(usage)
         if step.strip():
             check["failing_step"] = step.strip()
     if note.strip():
@@ -2181,15 +2186,40 @@ def keygen(path: Path) -> dict:
     return {"public_key": record["public_key"], "id": hashlib.sha256(public_bytes(key)).hexdigest()}
 
 
-def load_key(path: Path):
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    with os.fdopen(fd, encoding="utf-8") as stream:
-        mode = os.fstat(stream.fileno())
+def read_owner_only(path, cap, *, invalid, unopenable, too_large=ValueError) -> bytes:
+    """At most cap bytes of a regular file only its owner can read, through one descriptor:
+    no symlink, no reopen by name, and a file that grew past cap after the size check is
+    refused rather than read unbounded or cut short (PRs #15, #16). Errors never quote it."""
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        raise ValueError(unopenable) from None
+    try:
+        mode = os.fstat(fd)
         # Windows has no POSIX permission bits (st_mode reads 0o666): its file ACL is the guard there.
-        if not stat.S_ISREG(mode.st_mode) or (os.name != "nt" and mode.st_mode & 0o077):
-            raise ValueError("key file must be a regular file accessible only to its owner (chmod 600)")
+        if (not stat.S_ISREG(mode.st_mode) or (os.name != "nt" and mode.st_mode & 0o077)
+                or (hasattr(os, "getuid") and mode.st_uid != os.getuid())):
+            raise ValueError(invalid)
+        if mode.st_size > cap:
+            raise too_large(invalid)
         _warn_windows_acl(path)
-        record = json.loads(read_bounded(stream, "the key file", STATE_BYTES))
+        raw = bytearray()
+        while len(raw) <= cap:  # os.read may return less than asked: read to EOF or cap + 1
+            chunk = os.read(fd, cap + 1 - len(raw))
+            if not chunk:
+                break
+            raw += chunk
+        if len(raw) > cap:
+            raise too_large(invalid)
+        return bytes(raw)
+    finally:
+        os.close(fd)
+
+
+def load_key(path: Path):
+    record = json.loads(read_owner_only(
+        path, min(16384, STATE_BYTES), invalid="key file must be a regular file accessible only to its owner (chmod 600)",
+        unopenable="could not open the key file (it must exist and not be a symlink)", too_large=InputTooLarge).decode("utf-8"))
     private, _, serialization = crypto()
     raw = unb64(record["private_key"])
     if len(raw) == 32:
@@ -2429,19 +2459,9 @@ def load_wallet_key(path=None, env=WALLET_KEY_ENV) -> bytes:
     read, else from the environment variable env; never from an argument, which other
     users and shell history can see. Errors never quote the key."""
     if path is not None:
-        try:
-            fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
-        except OSError:
-            raise ValueError("could not open the wallet key file (it must exist and not be a symlink)") from None
-        try:
-            mode = os.fstat(fd)
-            if (not stat.S_ISREG(mode.st_mode) or (os.name != "nt" and mode.st_mode & 0o077) or mode.st_size > 256
-                    or (hasattr(os, "getuid") and mode.st_uid != os.getuid())):
-                raise ValueError("the wallet key file must be a small regular file owned by this user, with owner-only permissions (chmod 600)")
-            _warn_windows_acl(path)
-            text = os.read(fd, 257).decode("ascii", "replace")
-        finally:
-            os.close(fd)
+        text = read_owner_only(
+            path, 256, invalid="the wallet key file must be a small regular file owned by this user, with owner-only permissions (chmod 600)",
+            unopenable="could not open the wallet key file (it must exist and not be a symlink)").decode("ascii", "replace")
     else:
         text = os.environ.get(env, "")
         if not text: raise ValueError(f"no wallet key: pass --wallet-key FILE or set {env}")
@@ -2662,13 +2682,18 @@ class Client:
         command = sign({"operation": "agent.rotate"}, self.key, self.service, new_key)
         return self.send(command)
 
-    def prepare_enrollment(self, child_key, *, room, ttl, amount, generation, operations, spend_limit=None, origin=None, **data):
+    def prepare_enrollment(self, child_key, *, room, ttl, amount, generation, operations, spend_limit=None, origin=None,
+                           payout_address=None, **data):
         """Explicit public-room enrollment. Retain the returned prepared command for retries.
         spend_limit ({"credit_per_call","credit_per_day","expires_at"}) caps what the grant may
-        spend; origin names the site it acts for; data adds any other delegation.create field."""
+        spend; origin names the site it acts for; payout_address (0x and 40 hex) pins the one
+        USDC payout address the worker's claims and submits may name (without it they may
+        name none); data adds any other delegation.create field."""
         if self.key is None: raise ValueError("parent_key_required")
+        if payout_address is not None and not (isinstance(payout_address, str) and re.fullmatch(r"0x[0-9a-fA-F]{40}", payout_address)):
+            raise ValueError("invalid_payout_address")
         data = data_json("delegation.create", data, generation=generation, operations=list(operations), disclosure="public",
-                         spend_limit=spend_limit, origin=origin)
+                         spend_limit=spend_limit, origin=origin, payout_address=payout_address)
         command = self.prepare("delegation.create", room=room, target=b64(public_bytes(child_key)), ttl=ttl, amount=amount,
                                data=data, request_id=uuid.uuid4().hex)
         command["proof"] = b64(child_key.sign(canonical(command, self.service)))
@@ -2956,7 +2981,9 @@ class Client:
         if pages is not None and pages < 1:
             raise ValueError("pages is at least 1")
         if wait is None:  # the longest hold that still ends before the client timeout
-            wait = max(1, min(25, math.ceil(getattr(self, "timeout", None) or 30) - 5))
+            timeout = getattr(self, "timeout", None) or 30
+            wait = max(1, min(25, math.ceil(timeout) - 5))
+            if wait >= timeout: wait = None  # a deadline under 2 s leaves no room to hold
         path = Path(cursor_file) if cursor_file else None
         cursor = cursor or (read_cursor(path) if path else "")
         read = 0
@@ -3198,9 +3225,15 @@ class DelegatedClient(Client):
     grant remains active: the server checks every new command. Own-grant status
     retains the original context even after inactivity. Raw retained envelopes
     are sent unchanged; an ordinary Client may also explicitly relay them.
+    payout_address is the USDC payout address the grant pins (delegation.create
+    data payout_address), if any: work.claim and work.submit may name exactly
+    it and no other; without a pin they may name none (the server enforces both).
     """
-    def __init__(self, base_url, key, *, grant_id, generation, room, operations, timeout=30, service=SERVICE):
+    def __init__(self, base_url, key, *, grant_id, generation, room, operations, timeout=30, service=SERVICE, payout_address=None):
         if key is None: raise ValueError("child_key_required")
+        if payout_address is not None and not (isinstance(payout_address, str) and re.fullmatch(r"0x[0-9a-fA-F]{40}", payout_address)):
+            raise ValueError("invalid_payout_address")
+        self._payout_address = payout_address.lower() if payout_address else None
         context = delegation_context({"schema": 1, "grant_id": grant_id, "generation": generation})
         if hashlib.sha256(public_bytes(key)).hexdigest() != grant_id: raise ValueError("delegation_key_mismatch")
         if not isinstance(room, str) or not matches("slug", room): raise ValueError("invalid_delegation_room")
@@ -3247,6 +3280,12 @@ class DelegatedClient(Client):
                 data_for(op, data)
             except ValueError:
                 raise ValueError("delegation_generation_mismatch") from None
+            # A worker key never redirects its parent's USDC: payout_address only
+            # when the grant pins it, and then exactly the pinned address.
+            if "payout_address" in data:
+                if self._payout_address is None: raise ValueError("delegation_payout_unpinned")
+                if not isinstance(data["payout_address"], str) or data["payout_address"].lower() != self._payout_address:
+                    raise ValueError("delegation_payout_mismatch")
 
     def prepare(self, operation, **fields):
         command = {"operation": operation, **fields}
@@ -3574,13 +3613,34 @@ def inbound_view(client, text, settings, show_flagged=False, screen=None, sealed
 
 
 def write_private(path: Path, value):
-    """Write JSON readable only by its owner (mode 600, folder 700), atomically."""
+    """Write JSON readable only by its owner (mode 600, folder 700), atomically, through a unique
+    staging file in the same folder: never a fixed NAME.tmp, which may be the user's own file (PR #17)."""
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    temporary = path.with_suffix(".tmp")
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as stream:
-        json.dump(value, stream, ensure_ascii=False, indent=1)
-    os.replace(temporary, path)
+    # A fixed stem.tmp can already be a user's file (and coincides with path
+    # itself if its suffix is .tmp). Use a unique same-directory staging file.
+    fd, temporary = tempfile.mkstemp(prefix="." + path.name + ".", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(value, stream, ensure_ascii=False, indent=1)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        # Sync the directory entry after the file contents. Without this a
+        # successful return can precede a lost/old cursor or seal-key name on
+        # sudden power loss even though the temporary file was fsync'ed.
+        if os.name == "posix" and hasattr(os, "O_DIRECTORY"):
+            directory_fd = os.open(
+                path.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+            )
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
 
 
 def read_private(path: Path, default):
@@ -3804,10 +3864,11 @@ class Chat:
                               f"it {'sealed' if sealed else 'not sealed'}; nothing was sent or shown. Tell your human.")
         return sealed
 
-    def fetch(self, room, cursor):
+    def fetch(self, room, cursor, *, mark_read=True):
         """Every message after cursor, opened when sealed: the conversation, the
         messages, the page cursor each came from, and the cursor after them.
-        No cursor starts at this key's read marker. Each page raises it."""
+        No cursor starts at this key's read marker. Each page raises it, unless
+        mark_read is false (chat read --peek, PR #20)."""
         first = self.get(room, limit=1)
         conv = first["data"]["conversation"]
         got = {"conversation": conv, "sealed": first["sealed"], "messages": [], "pages": {}, "opened": {}, "cursor": cursor}
@@ -3816,9 +3877,20 @@ class Chat:
             # A request shows the requester's first messages, whatever the cursor.
             pages = [("", first)]
         else:
-            cursor, pages = cursor or first["data"].get("read_marker") or "start", []
+            # mark_read commits the server's read marker during this fetch, well
+            # before show() saves our local cursor/withheld-message IDs. A crash
+            # in between must replay from a durable bookmark, not start at the
+            # now-advanced server marker and silently drop the first messages.
+            if not cursor:
+                proposed = first["data"].get("read_marker") or "start"
+                persisted = load_chat(room)
+                if not persisted.get("cursor"):
+                    persisted["cursor"] = proposed
+                    save_chat(persisted)  # fail before remote mark_read on disk error
+                cursor = persisted["cursor"]
+            pages = []
             while True:
-                res = self.get(room, cursor=cursor, limit=100, mark_read=True)
+                res = self.get(room, cursor=cursor, limit=100, mark_read=mark_read)
                 pages.append((cursor, res))
                 cursor = res.get("next_cursor") or cursor
                 if not res["data"].get("has_more"): break
@@ -3832,10 +3904,11 @@ class Chat:
                     got["opened"][m["id"]] = sealed.open(m)
         return got
 
-    def show(self, state, got, show_flagged=False):
+    def show(self, state, got, show_flagged=False, *, acknowledge=True):
         """Print new messages from others (and, with --show-flagged, those
-        withheld before), each through inbound screening; save the cursor;
-        exit 4 if anything was withheld."""
+        withheld before), each through inbound screening; save the cursor
+        (not with acknowledge=False: a --peek moves no marker); exit 4 if
+        anything was withheld."""
         announce(state, weakened(self.settings, self.sources, "inbound"), self.err)
         conv, room = got["conversation"], state["room"]
         if got["sealed"]:
@@ -3870,6 +3943,14 @@ class Chat:
             print(f"error: {unscreened}, so the messages above are withheld (inbound.fail_closed). Ask your human to choose: "
                   f"chat read {room} --show-flagged shows them once; --inbound-mode warn shows unscreened messages, labelled; "
                   "chat protect set inbound.mode=server has the SwarmMemo server screen them at delivery.", file=self.err)
+        try:
+            self.out.flush()
+        except OSError:
+            # The reader went away (a closed pipe, `| head`): keep the old cursor, so the
+            # messages it never saw are shown again on the next read.
+            return 1
+        if not acknowledge:
+            return 4 if withheld else 0
         if got["cursor"]:
             state["cursor"] = got["cursor"]
         save_chat(state)
@@ -4199,6 +4280,10 @@ class Chat:
 
     def read(self):
         state = load_chat(self.args.room)
+        if getattr(self.args, "peek", False):
+            if self.args.show_flagged:
+                raise ChatStop(1, "--peek can't be combined with --show-flagged: reviewing withheld messages needs a normal read")
+            return self.show(state, self.fetch(self.args.room, state.get("cursor"), mark_read=False), acknowledge=False)
         return self.show(state, self.fetch(self.args.room, state.get("cursor")), self.args.show_flagged)
 
     def wait(self):
@@ -4502,6 +4587,7 @@ def add_chat_parser(commands):
     download.add_argument("room"); download.add_argument("id", help="the attachment id chat read shows"); download.add_argument("path")
     read = add("read", "print new messages, screened")
     read.add_argument("room"); read.add_argument("--show-flagged", action="store_true", help="show what screening withheld, for your human")
+    read.add_argument("--peek", action="store_true", help="show what is new without marking it read, here or on the server; a later chat read shows it again")
     wait = add("wait", "wait for a new message, then print it")
     wait.add_argument("room", nargs="?"); wait.add_argument("--all", action="store_true", help="anything new: the one inbox")
     wait.add_argument("--timeout", type=int, default=600); wait.add_argument("--show-flagged", action="store_true")

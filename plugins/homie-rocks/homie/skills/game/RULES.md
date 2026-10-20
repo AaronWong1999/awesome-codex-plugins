@@ -6,6 +6,8 @@ A rules game has `src/rules.ts`, `src/move.ts`, `src/view.ts`, `game.json`,
 from the same package. Import `move` into the rules. Pictures and controls belong in
 view.ts; shared movement belongs in move.ts; all game decisions belong in rules.ts.
 
+Rules may import a deterministic part already added to this studio with `@parts/<host>/<id>` (or an own part with `@parts/<id>`). The re-export created by `part_new` works too. Every imported module is checked by the same rules guard; browser-only audio, UI and control parts belong in the view. Parts cannot import arbitrary files outside this game and registered parts.
+
 ```ts
 import { defineRules, f } from '@homie-rocks/studio/rules';
 import { move } from './move';
@@ -120,6 +122,7 @@ length before taking an entry or using modulo.
 A player's kind currently requires a body and a named move handler even when the
 interface is a board, quiz or poll. Use `body: { shape: 'circle', radius: 0.1,
 maxSpeed: 0 }` and `defineMove({ participant() {} })` for a `participant` kind.
+The `block-drop` starter is a complete falling-block example: one stationary player anchor owns one 10×20 well, bots use their own input, and the view identifies players by `seat` (not `slot`). Its `pieces.ts` shares immutable geometry between rules and view. Read it before inventing a board-game API.
 The anchor need not be drawn. Use commands for choices; validate whose turn it is,
 then send an event to a room handler to update shared state. Do not fabricate movement
 or a score to satisfy a test.
@@ -276,6 +279,8 @@ movement state. Players also have readonly `seat`, `owner`, `driver`
 Do not add a role, policy, owner or guide field to client input as a source of authority.
 
 ## Handler slots
+
+There is no `room.tick` hook. For periodic room work, schedule a declared room event with `world.after`; an entity can ask the room to act with `world.sendRoom`. Only the room handler calls `world.round.end()`.
 
 | Slot | Arguments and purpose |
 | --- | --- |

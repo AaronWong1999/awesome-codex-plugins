@@ -1504,6 +1504,21 @@
       "icon": "./plugins/orwa-mahmoud/nightshift/assets/nightshift-logo.png"
     },
     {
+      "name": "off-the-wall",
+      "displayName": "Off the Wall",
+      "source": {
+        "source": "local",
+        "path": "./plugins/toranalytics/off-the-wall"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Development & Workflow",
+      "description": "Quotes your own past corrections back to Codex, word for word, before each answer; `otw report` shows what you correct most from your local history, and subagent routing names a cheaper model per subagent. No API key.",
+      "icon": "./plugins/toranalytics/off-the-wall/assets/icon.png"
+    },
+    {
       "name": "oh-my-cassette",
       "displayName": "Oh My Cassette",
       "source": {

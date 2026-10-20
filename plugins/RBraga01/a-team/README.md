@@ -14,11 +14,14 @@
 
 **[→ Visual overview & live demo](https://rbraga01.github.io/a-team/)**
 
-**Illustrative first session** (expected workflow, not a recorded terminal capture):
+**Recorded first session (before logical pruning)** (Windows disposable Python project, 2026-10-19; excerpts from [init](docs/validation/claude-init-2026-10-19.txt) and [morning](docs/validation/claude-morning-2026-10-19.txt)):
 
 ```text
-/orchestrate init      → reads INIT.md; creates .agent-sync/TEAM.md and ROUTING.md
-/orchestrate morning   → reads TASKS.md; proposes up to 3 tasks; pauses for approval
+npx --yes @anthropic-ai/claude-code -p '/orchestrate init' --model sonnet --max-turns 12 --max-budget-usd 1 --permission-mode acceptEdits --permission-prompts none --output-format text
+`/orchestrate init` is only partly done. The orchestrator wrote `.agent-sync/TEAM.md` and `.agent-sync/ROUTING.md`, but it deleted nothing.
+
+npx --yes @anthropic-ai/claude-code -p '/orchestrate morning' --model sonnet --max-turns 12 --max-budget-usd 1 --permission-mode acceptEdits --permission-prompts none --output-format text
+I've written today's plan to `.agent-sync/DAILY.md` and dispatched nothing. The morning plan needs your approval first.
 ```
 
 [Getting started](docs/getting-started.md) · [Full documentation](docs/README.md)**
@@ -49,6 +52,8 @@ The infrastructure is stateless by design. Every agent derives its context from 
 
 Pick a method below. All copy the shared infrastructure plus platform-specific files. **Copying plugin files is not the same as activating a CLI plugin**; follow [platform activation](docs/installation.md#platform-plugin-activation).
 
+The shared security hooks require Python 3.9 or newer available as `python3`. Both installers verify this before copying files.
+
 ### Option A — One-liner (recommended)
 
 **Mac / Linux / WSL:**
@@ -72,7 +77,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/RBraga01/a-team/main/install
 
 ```bash
 gh repo clone RBraga01/a-team -- --depth 1
-cp -r a-team/.claude a-team/.claude-plugin a-team/.codex-plugin a-team/.cursor-plugin a-team/.copilot-plugin a-team/.opencode a-team/skills a-team/hooks a-team/templates a-team/scripts a-team/assets your-project/
+cp -r a-team/.claude a-team/.claude-plugin a-team/.codex-plugin a-team/.cursor-plugin a-team/.copilot-plugin a-team/com.github.copilot a-team/.opencode a-team/skills a-team/hooks a-team/templates a-team/scripts a-team/assets your-project/
 cp -n a-team/AGENTS.md a-team/CLAUDE.md a-team/plugin.json your-project/
 cp -n a-team/INIT_TEMPLATE.md your-project/INIT.md
 rm -rf a-team
@@ -86,8 +91,8 @@ rm -rf a-team
 git clone --filter=blob:none --sparse --depth 1 \
   https://github.com/RBraga01/a-team.git
 cd a-team
-git sparse-checkout set .claude .claude-plugin .codex-plugin .cursor-plugin .copilot-plugin .opencode skills hooks templates scripts assets
-cp -r .claude .claude-plugin .codex-plugin .cursor-plugin .copilot-plugin .opencode skills hooks templates scripts assets ../your-project/
+git sparse-checkout set .claude .claude-plugin .codex-plugin .cursor-plugin .copilot-plugin com.github.copilot .opencode skills hooks templates scripts assets
+cp -r .claude .claude-plugin .codex-plugin .cursor-plugin .copilot-plugin com.github.copilot .opencode skills hooks templates scripts assets ../your-project/
 cp -n AGENTS.md CLAUDE.md plugin.json ../your-project/
 cp -n INIT_TEMPLATE.md ../your-project/INIT.md
 cd .. && rm -rf a-team
@@ -99,8 +104,8 @@ cd .. && rm -rf a-team
 git clone --filter=blob:none --sparse --depth 1 `
   https://github.com/RBraga01/a-team.git
 cd a-team
-git sparse-checkout set .claude .claude-plugin .codex-plugin .cursor-plugin .copilot-plugin .opencode skills hooks templates scripts assets
-Copy-Item -Recurse .claude,.claude-plugin,.codex-plugin,.cursor-plugin,.copilot-plugin,.opencode,skills,hooks,templates,scripts,assets ..\your-project\
+git sparse-checkout set .claude .claude-plugin .codex-plugin .cursor-plugin .copilot-plugin com.github.copilot .opencode skills hooks templates scripts assets
+Copy-Item -Recurse .claude,.claude-plugin,.codex-plugin,.cursor-plugin,.copilot-plugin,com.github.copilot,.opencode,skills,hooks,templates,scripts,assets ..\your-project\
 foreach ($f in 'AGENTS.md','CLAUDE.md','plugin.json','INIT_TEMPLATE.md') {
   $target = if ($f -eq 'INIT_TEMPLATE.md') { 'INIT.md' } else { $f }
   if (-not (Test-Path "..\\your-project\\$target")) { Copy-Item $f "..\\your-project\\$target" }
@@ -114,7 +119,7 @@ cd .. ; Remove-Item a-team -Recurse -Force
 
 1. Go to [github.com/RBraga01/a-team](https://github.com/RBraga01/a-team)
 2. Click **Code → Download ZIP**
-3. Extract and copy `.claude/`, `.claude-plugin/`, `.codex-plugin/`, `.cursor-plugin/`, `.copilot-plugin/`, `.opencode/`, `skills/`, `hooks/`, `templates/`, `scripts/`, `assets/` into your project root
+3. Extract and copy `.claude/`, `.claude-plugin/`, `.codex-plugin/`, `.cursor-plugin/`, `.copilot-plugin/`, `com.github.copilot/`, `.opencode/`, `skills/`, `hooks/`, `templates/`, `scripts/`, `assets/` into your project root
 4. Copy `AGENTS.md`, `CLAUDE.md` and root `plugin.json` only when they do not already exist; otherwise review and merge instructions manually. Copy `INIT_TEMPLATE.md` as `INIT.md` when absent.
 
 ---
@@ -124,14 +129,14 @@ cd .. ; Remove-Item a-team -Recurse -Force
 If the project is already in progress, use `cp -rn` (no-clobber) when copying the folders so your existing files are not overwritten:
 
 ```bash
-cp -rn a-team/.claude a-team/.claude-plugin a-team/.codex-plugin a-team/.cursor-plugin a-team/.copilot-plugin a-team/.opencode a-team/skills a-team/hooks a-team/templates a-team/scripts a-team/assets ./
+cp -rn a-team/.claude a-team/.claude-plugin a-team/.codex-plugin a-team/.cursor-plugin a-team/.copilot-plugin a-team/com.github.copilot a-team/.opencode a-team/skills a-team/hooks a-team/templates a-team/scripts a-team/assets ./
 cp -n a-team/AGENTS.md a-team/CLAUDE.md a-team/plugin.json ./
 cp -n a-team/INIT_TEMPLATE.md ./INIT.md
 ```
 
-Then fill out `INIT.md` to describe **what already exists** — languages, frameworks, current test coverage, known technical debt. The orchestrator uses this to prune irrelevant agents; accuracy here matters more than on a greenfield project.
+Then fill out `INIT.md` to describe **what already exists** — languages, frameworks, current test coverage, known technical debt. The orchestrator uses this to select an active roster **without deleting the other agents/skills**; accuracy matters more than on a greenfield project.
 
-After running `/orchestrate init`, review `.agent-sync/TEAM.md` before doing any work. Restore any agent that was incorrectly pruned. Start the first session with `/orchestrate morning` to let the orchestrator read the repo state before touching anything.
+After running `/orchestrate init`, review `.agent-sync/TEAM.md` before doing any work. Agents and skills stay installed: reactivate an incorrect selection with explicit reinitialization, not manual file restoration. Start the first session with `/orchestrate morning` to let the orchestrator read the repo state before touching anything.
 
 > **Note:** For existing projects, Bash and PowerShell installers now merge missing files into existing folders without overwriting conflicts. Existing `.claude/settings.json`, `CLAUDE.md` and `AGENTS.md` are preserved — merge A Team policies and permissions manually after installation.
 
@@ -157,9 +162,9 @@ Takes about 5 minutes.
 /orchestrate init
 ```
 
-The orchestrator reads `INIT.md`, prunes irrelevant agents and skills, and generates:
-- `.agent-sync/TEAM.md` — permanent record of the active roster
-- `.agent-sync/ROUTING.md` — task routing table + file claims table
+The orchestrator reads `INIT.md`, selects active agents and skills **logically**, and retains every installed profile. It runs `python scripts/roster.py init` and `verify`, generating:
+- `.agent-sync/TEAM.md` — exhaustive active/inactive roster with a fingerprint
+- `.agent-sync/ROUTING.md` — eligible **active** agents and file claims
 
 ### 3. Start working
 
@@ -239,10 +244,10 @@ A Team distributes definitions for five tools. Shared state in `.agent-sync/` is
 | **Claude Code** | `.claude/agents/` | `skills/` | `.claude/rules/` | project settings | `.claude/commands/` |
 | **Codex CLI** | Not declared by this plugin | `./skills/` | `AGENTS.md` as project instructions | `SessionStart` declared | Not declared |
 | **Cursor** | `./.claude/agents/` | `./skills/` | `./.claude/rules/` | `sessionStart` declared | Not declared |
-| **GitHub Copilot CLI** | `../.claude/agents/`* | `../skills/`* | Not declared | Four events declared* | Not declared |
+| **GitHub Copilot CLI** | `com.github.copilot/agents/` | root `skills/` | Not declared | Four events declared* | Not declared |
 | **OpenCode** | No A Team-native agents bundled | Host-discovered or manual | Not declared | Not declared | `.opencode/commands/` |
 
-*Copilot uses a separate legacy plugin installed from `.copilot-plugin/`. Whether its sibling component paths remain available after installation has **not** been verified; do not assume those hooks are active.*
+*Copilot CLI 1.0.98 installed the repository-root plugin and discovered all 20 skills on Windows. An authenticated session confirmed that the shared project hook blocked a test `.env` read. Native agent invocation remains unverified.*
 
 ### Running multiple CLIs on the same project
 
@@ -262,12 +267,12 @@ All CLIs share `.agent-sync/` (DAILY.md, ROUTING.md, TEAM.md, results/). This me
 
 **OpenCode** receives A Team's command aliases in `.opencode/commands/`. This distribution does not bundle OpenCode-native agent or hook definitions; this is not a limitation of the OpenCode platform itself.
 
-**GitHub Copilot CLI** has a legacy manifest declaring agents, skills and four hook events. Its installation command is valid, but package-relative component loading and enforcement parity have **not** been demonstrated on a real Copilot CLI session.
+**GitHub Copilot CLI** loads the portable root plugin. Copilot-specific agents and hooks are under `com.github.copilot/`; 20 skills loaded in a Windows CLI install. A shared project hook blocked a test `.env` read in an authenticated session; native agent invocation still needs validation.
 
 Install:
 
 ```bash
-copilot plugin install RBraga01/a-team:.copilot-plugin
+copilot plugin install RBraga01/a-team
 ```
 
 ---
@@ -275,7 +280,7 @@ copilot plugin install RBraga01/a-team:.copilot-plugin
 ## Command Reference
 
 ```
-/orchestrate init       Read INIT.md, prune team, generate TEAM.md + ROUTING.md
+/orchestrate init       Read INIT.md, select active team (no deletions), generate TEAM.md + ROUTING.md
 /orchestrate morning    Plan today's tasks (requires human approval before dispatch)
 /orchestrate tick       Process completed task results, dispatch unblocked tasks
 /orchestrate report     End-of-day telemetry
@@ -314,9 +319,9 @@ MIT — see [LICENSE](LICENSE). You are free to use, modify, and distribute A Te
 
 ## Adding a New Agent
 
-1. Create `.claude/agents/<name>.md` with the frontmatter (`name`, `description`, `allowedTools`, `model`) and instructions.
-2. Add the agent to `.agent-sync/TEAM.md` (active roster).
-3. Add a routing rule in `.agent-sync/ROUTING.md`.
+1. Create `.claude/agents/<name>.md` with native frontmatter (`name`, `description`, `tools`, `model`) and instructions.
+2. Run `python scripts/sync_plugin_agents.py` if this is part of the distributed A Team package.
+3. Ask for approval to reinitialize the project with `scripts/roster.py init --replace` using explicit active agent/skill lists; **never edit TEAM.md and ROUTING.md separately**, and never delete profiles for pruning.
 4. Add the trigger condition to `skills/using-a-team/SKILL.md`.
 5. Add a session-start check to `hooks/session-start.md` if the agent has a mandatory trigger.
 
