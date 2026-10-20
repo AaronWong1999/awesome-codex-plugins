@@ -1312,6 +1312,21 @@
       "icon": "./plugins/yimwoo/hotl-plugin/docs/assets/codex/hotl-icon.png"
     },
     {
+      "name": "sirv-media-skills",
+      "displayName": "Image & Media Skills",
+      "source": {
+        "source": "local",
+        "path": "./plugins/IgorVaryvoda/image-optimization-skill"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Development & Workflow",
+      "description": "Eight skills that audit and fix image and video delivery for Core Web Vitals, plus Sirv image CDN, 360 spin, and AI Studio workflows.",
+      "icon": "./plugins/IgorVaryvoda/image-optimization-skill/.claude-plugin/icon.png"
+    },
+    {
       "name": "jev-use",
       "displayName": "jev-use",
       "source": {

@@ -3,7 +3,7 @@
   "name": "awesome-codex-plugins",
   "version": "1.0.0",
   "last_updated": "2026-10-20",
-  "total": 311,
+  "total": 312,
   "categories": [
     "Development & Workflow",
     "Tools & Integrations"
@@ -888,6 +888,16 @@
       "category": "Development & Workflow",
       "source": "awesome-codex-plugins",
       "install_url": "https://raw.githubusercontent.com/yimwoo/hotl-plugin/HEAD/.codex-plugin/plugin.json"
+    },
+    {
+      "name": "Image & Media Skills",
+      "url": "https://github.com/IgorVaryvoda/image-optimization-skill",
+      "owner": "IgorVaryvoda",
+      "repo": "image-optimization-skill",
+      "description": "Eight skills that audit and fix image and video delivery for Core Web Vitals, plus Sirv image CDN, 360 spin, and AI Studio workflows.",
+      "category": "Development & Workflow",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/IgorVaryvoda/image-optimization-skill/HEAD/.codex-plugin/plugin.json"
     },
     {
       "name": "jev-use",
