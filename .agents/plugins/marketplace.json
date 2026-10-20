@@ -1697,6 +1697,20 @@
       "icon": "./plugins/mimfort/rag_for_git/plugin/assets/icon.svg"
     },
     {
+      "name": "nueton-receipts",
+      "displayName": "Receipts by Nueton",
+      "source": {
+        "source": "local",
+        "path": "./plugins/Kloudedge-apex/receipts-collector"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Development & Workflow",
+      "description": "Checks every \"done\" claim in local Codex and Claude Code session logs against the same session's commands and prints the counts plus a shareable card, read-only and offline."
+    },
+    {
       "name": "red-green-proof",
       "displayName": "Red-Green Proof",
       "source": {

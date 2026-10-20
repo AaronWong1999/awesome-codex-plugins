@@ -3,7 +3,7 @@
   "name": "awesome-codex-plugins",
   "version": "1.0.0",
   "last_updated": "2026-10-20",
-  "total": 312,
+  "total": 313,
   "categories": [
     "Development & Workflow",
     "Tools & Integrations"
@@ -1148,6 +1148,16 @@
       "category": "Development & Workflow",
       "source": "awesome-codex-plugins",
       "install_url": "https://raw.githubusercontent.com/mimfort/rag_for_git/HEAD/.codex-plugin/plugin.json"
+    },
+    {
+      "name": "Receipts by Nueton",
+      "url": "https://github.com/Kloudedge-apex/receipts-collector",
+      "owner": "Kloudedge-apex",
+      "repo": "receipts-collector",
+      "description": "Checks every \"done\" claim in local Codex and Claude Code session logs against the same session's commands and prints the counts plus a shareable card, read-only and offline.",
+      "category": "Development & Workflow",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/Kloudedge-apex/receipts-collector/HEAD/.codex-plugin/plugin.json"
     },
     {
       "name": "Red-Green Proof",
