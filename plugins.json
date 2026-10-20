@@ -3,7 +3,7 @@
   "name": "awesome-codex-plugins",
   "version": "1.0.0",
   "last_updated": "2026-10-20",
-  "total": 314,
+  "total": 315,
   "categories": [
     "Development & Workflow",
     "Tools & Integrations"
@@ -1860,6 +1860,16 @@
       "install_url": "https://raw.githubusercontent.com/Ratnam-Mishra/canvas-apps-plugin-codex/HEAD/.codex-plugin/plugin.json"
     },
     {
+      "name": "Car Rental Business Skills",
+      "url": "https://github.com/sergebulaev/car-rental-skills",
+      "owner": "sergebulaev",
+      "repo": "car-rental-skills",
+      "description": "Codex-ready bundle for exotic, luxury and Turo car rental operators with a native .codex-plugin manifest and 8 skills that price a car against live published daily rates from a free read-only market data MCP server, scan competitors, plan a rental business, and draft rental agreements, damage inspections, listings, social posts and review replies; also works in Claude Code.",
+      "category": "Tools & Integrations",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/sergebulaev/car-rental-skills/HEAD/.codex-marketplace/car-rental-skills/.codex-plugin/plugin.json"
+    },
+    {
       "name": "CarsXE",
       "url": "https://github.com/carsxe/carsxe-codex-plugin",
       "owner": "carsxe",
@@ -2797,7 +2807,7 @@
       "description": "Define custom events in plain language, check them with lightweight probes, and resume your Codex conversation when they fire.",
       "category": "Tools & Integrations",
       "source": "awesome-codex-plugins",
-      "install_url": "https://raw.githubusercontent.com/hyprh/self-starter/HEAD/plugin/.codex-plugin/plugin.json"
+      "install_url": "https://raw.githubusercontent.com/hyprh/self-starter/HEAD/codex-plugin/.codex-plugin/plugin.json"
     },
     {
       "name": "SEO Dungeon",

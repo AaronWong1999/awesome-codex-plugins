@@ -2744,6 +2744,21 @@
       "description": "Build and edit Microsoft Power Apps Canvas Apps using natural language and Canvas Authoring MCP server."
     },
     {
+      "name": "car-rental-skills",
+      "displayName": "Car Rental Business Skills",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sergebulaev/car-rental-skills"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations",
+      "description": "Codex-ready bundle for exotic, luxury and Turo car rental operators with a native .codex-plugin manifest and 8 skills that price a car against live published daily rates from a free read-only market data MCP server, scan competitors, plan a rental business, and draft rental agreements, damage inspections, listings, social posts and review replies; also works in Claude Code.",
+      "icon": "./plugins/sergebulaev/car-rental-skills/assets/icon.svg"
+    },
+    {
       "name": "carsxe",
       "displayName": "CarsXE",
       "source": {
